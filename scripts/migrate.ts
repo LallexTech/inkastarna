@@ -1,6 +1,6 @@
-import { getMigrations } from 'better-auth/db/migration';
-import { auth } from '../src/lib/auth';
-import { db } from '../src/lib/db';
+import { getMigrations } from "better-auth/db/migration";
+import { auth } from "../src/lib/auth";
+import { db } from "../src/lib/db";
 
 const migration = await getMigrations(auth.options);
 await migration.runMigrations();
@@ -37,7 +37,14 @@ await db.query(`
   );
   CREATE UNIQUE INDEX IF NOT EXISTS unique_player_account_name ON "user"(lower(name));
 `);
-const initialRoster=(process.env.INITIAL_ROSTER??'').split(',').map(x=>x.trim()).filter(Boolean);
-for (const name of initialRoster) await db.query('INSERT INTO roster(id,name) VALUES($1,$2) ON CONFLICT DO NOTHING', [name.toLowerCase(),name]);
-console.log('Auth- och lagtabeller är uppdaterade.');
+const initialRoster = (process.env.INITIAL_ROSTER ?? "")
+  .split(",")
+  .map((x) => x.trim())
+  .filter(Boolean);
+for (const name of initialRoster)
+  await db.query(
+    "INSERT INTO roster(id,name) VALUES($1,$2) ON CONFLICT DO NOTHING",
+    [name.toLowerCase(), name],
+  );
+console.log("Auth- och lagtabeller är uppdaterade.");
 await db.end();

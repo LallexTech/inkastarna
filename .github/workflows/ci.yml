@@ -1,7 +1,7 @@
 name: Quality checks
 on:
   push:
-    branches: [main, pre, 'feature/**']
+    branches: [main, pre, "feature/**"]
   pull_request:
     branches: [pre, main]
 permissions:
@@ -20,7 +20,7 @@ jobs:
           POSTGRES_USER: inkastarna_test
           POSTGRES_PASSWORD: ci_disposable_database
           POSTGRES_DB: inkastarna_test
-        ports: ['5432:5432']
+        ports: ["5432:5432"]
         options: >-
           --health-cmd pg_isready --health-interval 10s
           --health-timeout 5s --health-retries 5
@@ -30,12 +30,12 @@ jobs:
       BETTER_AUTH_URL: http://localhost:3100
       TEAM_JOIN_CODE: ci-only-team-code
       ADMIN_JOIN_CODE: ci-only-admin-code
-      NEXT_TELEMETRY_DISABLED: '1'
+      NEXT_TELEMETRY_DISABLED: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: "24"
           cache: npm
       - run: npm ci
       - run: npm run db:migrate
