@@ -1,0 +1,25 @@
+name: Branch policy
+on:
+  pull_request:
+    branches: [pre, main]
+    types: [opened, synchronize, reopened, edited]
+permissions:
+  contents: read
+jobs:
+  policy:
+    name: Validate source branch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce feature to pre to main
+        env:
+          BASE: ${{ github.base_ref }}
+          HEAD: ${{ github.head_ref }}
+          REPO: ${{ github.repository }}
+          SOURCE_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          test "$REPO" = "$SOURCE_REPO" || { echo 'Fork PRs are not accepted'; exit 1; }
+          if [ "$BASE" = main ]; then
+            test "$HEAD" = pre || { echo 'Only pre may be promoted to main'; exit 1; }
+          else
+            [[ "$HEAD" == feature/* ]] || { echo 'Use a feature/* branch'; exit 1; }
+          fi
