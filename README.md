@@ -1,9 +1,9 @@
 # Inkastarna
 
-Lagappen för Inkastarna. Innefotboll, 2 × 15 minuter, Stora Mossen. Next.js, React, Better Auth och Neon Postgres, drift på Vercel.
+Lagappen för Inkastarna. Innefotboll, 2 × 15 minuter, Stora Mossen. Next.js, React, Better Auth och Neon Postgres, drift på Netlify.
 
-- Förhandsmiljö: https://inkastarna-pre.vercel.app
-- Produktion efter releasegodkännande: https://inkastarna.vercel.app
+- Förhandsmiljö: https://pre--inkastarna.netlify.app
+- Produktion efter releasegodkännande: https://inkastarna.netlify.app
 - Officiell serie: https://korpenstockholm.zoezi.se/serie/9266
 
 ## Funktioner
@@ -36,7 +36,7 @@ npm run dev
 
 `INITIAL_ROSTER` innehåller kommaseparerade förnamn och läses endast av migreringen. Befintliga spelare ersätts inte när migreringen körs igen. Auth-tabeller migreras med Better Auths egen migrerare. Appens schemaändringar ska vara additiva och bakåtkompatibla.
 
-`vercel env pull` skriver över målfilen och preview-hemligheter följer inte med. Behåll lokala utvecklingsvärden separat och skriv inte över en fungerande `.env.local`. Inga `.env`-filer eller registreringskoder får committas.
+Miljövariabler sätts i Netlify, med separata värden för `production` respektive `branch-deploy` och `deploy-preview`. Behåll lokala utvecklingsvärden i `.env.local`. Inga `.env`-filer, API-token eller registreringskoder får committas. Netlifys Free-plan använder vanliga servervariabler; de är läsbara för projektadministratören men skickas aldrig till webbläsaren. Ingen `NEXT_PUBLIC_`-variabel får innehålla en hemlighet.
 
 ## Kontroller
 
@@ -54,11 +54,17 @@ Webbläsartesterna täcker mobilnavigation, PWA-ikoner/offline, registreringskod
 Utveckling sker via `feature/*` → `pre` → `main`.
 
 1. Skapa `feature/beskrivning` från uppdaterad `pre`.
-2. Pusha och öppna PR till `pre`. Actions kontrollerar källbranch, typer, tester, bygge och webbläsarflöden. Vercel bygger en Preview.
-3. Efter gröna kontroller mergas PR:en till `pre`. Granska https://inkastarna-pre.vercel.app.
+2. Pusha och öppna PR till `pre`. Actions kontrollerar källbranch, typer, tester, bygge och webbläsarflöden. Netlify bygger en Preview.
+3. Efter gröna kontroller mergas PR:en till `pre`. Granska https://pre--inkastarna.netlify.app.
 4. Kör **Actions → Prepare production release** på `main`, eller öppna en PR från `pre` till `main`.
-5. Produktion släpps först efter godkända kontroller och uttryckligt klartecken från lagägaren. Workflow skapar enbart release-PR:en; det mergar aldrig självt. Merge till `main` triggar produktionsbygget på Vercel.
+5. Produktion släpps först efter godkända kontroller och uttryckligt klartecken från lagägaren. Workflow skapar enbart release-PR:en; det mergar aldrig självt. Merge till `main` triggar produktionsbygget på Netlify.
 
-GitHub ska kräva `Validate source branch` och `Build and test` på `pre` och `main`, även för administratörer. Direkta pushar, force push och branchradering ska vara blockerade. Endast `pre` får vara källbranch för PR till `main`. Vercels produktionsbranch ska vara `main`. Delad preview-domän är knuten till `pre`.
+GitHub ska kräva `Validate source branch`, `Build and test` och `Netlify preview` på `pre` och `main`, även för administratörer. Direkta pushar, force push och branchradering ska vara blockerade. Endast `pre` får vara källbranch för PR till `main`. Netlifys produktionsbranch är `main`. Branch `pre` bygger den delade förhandsmiljön `pre--inkastarna.netlify.app`. PR:er får egna förhandsbyggen. GitHub-kontrollen `Netlify preview` verifierar att rätt commit har ett färdigt Netlify-bygge.
 
-Nya feature- och pre-byggen använder endast preview-databasen. Migrering körs före Vercel-bygget mot respektive miljös databas. Lösenord, sessionsnycklar, databasanslutningar och inbjudningskoder hanteras som serverhemligheter i Vercel.
+Nya feature- och pre-byggen använder endast preview-databasen. Migrering körs före Netlify-bygget mot respektive miljös databas. Lösenord, sessionsnycklar, databasanslutningar och inbjudningskoder hanteras som servervariabler i Netlify.
+
+## Hosting och kostnad
+
+Projektet flyttades från Vercel efter en teamgemensam CPU-spärr utlöst av ett annat projekt. Netlify Free har 300 krediter per månad och kan också pausa sajter när gränsen nås. Förhandsbyggen används för utveckling; publicera produktion först när en release är granskad. Kontrollera aktuella priser och förbrukning i Netlify. Neon-databaserna är oförändrade och oberoende av Vercels compute-spärr.
+
+GitHub ansluter via en läsbehörig deploynyckel för just det här repot och en webhook. GitHub Actions använder `NETLIFY_AUTH_TOKEN` som repository secret och `NETLIFY_SITE_ID` som repository variable för att verifiera bygget. Kopiera aldrig dessa värden till källkod. Netlifys schemalagda funktion anropar `/api/sync` med `CRON_SECRET` endast i produktion. Vercel-konfigurationen behålls som referens men används inte för den nya driften.

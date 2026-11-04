@@ -3,17 +3,8 @@ import { betterAuth } from "better-auth";
 import { createAuthMiddleware, APIError } from "better-auth/api";
 import { nextCookies } from "better-auth/next-js";
 import { db } from "./db";
-
-export function appOrigins() {
-  return [
-    ...(!process.env.VERCEL ? ["http://localhost:3000"] : []),
-    ...(process.env.BETTER_AUTH_URL ? [process.env.BETTER_AUTH_URL] : []),
-    ...(process.env.VERCEL_URL ? [`https://${process.env.VERCEL_URL}`] : []),
-    ...(process.env.VERCEL_BRANCH_URL
-      ? [`https://${process.env.VERCEL_BRANCH_URL}`]
-      : []),
-  ];
-}
+import { appOrigins, appBaseUrl } from "./app-url";
+export { appOrigins } from "./app-url";
 
 export function validTeamCode(value: unknown, admin = false) {
   const expected = admin
@@ -28,11 +19,7 @@ export function validTeamCode(value: unknown, admin = false) {
 export const auth = betterAuth({
   appName: "Inkastarna",
   database: db,
-  baseURL:
-    process.env.BETTER_AUTH_URL ||
-    (process.env.VERCEL_URL
-      ? `https://${process.env.VERCEL_URL}`
-      : "http://localhost:3000"),
+  baseURL: appBaseUrl(),
   trustedOrigins: appOrigins(),
   emailAndPassword: { enabled: true, minPasswordLength: 10 },
   session: { expiresIn: 60 * 60 * 24 * 30, updateAge: 60 * 60 * 24 },

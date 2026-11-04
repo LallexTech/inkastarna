@@ -50,3 +50,20 @@ jobs:
           name: playwright-traces
           path: test-results/
           retention-days: 5
+  netlify:
+    name: Netlify preview
+    needs: quality
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/pre' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: node .github/scripts/verify-netlify.mjs
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ vars.NETLIFY_SITE_ID }}
+          DEPLOY_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          DEPLOY_BRANCH: ${{ github.head_ref || github.ref_name }}

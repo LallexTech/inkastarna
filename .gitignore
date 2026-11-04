@@ -1,6 +1,7 @@
 node_modules/
 .next/
 .vercel/
+.netlify/
 .env*
 !.env.example
 playwright-report/
