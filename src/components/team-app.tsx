@@ -159,6 +159,8 @@ export default function TeamApp() {
     [profileOpen, setProfileOpen] = useState(false),
     [mobileOpen, setMobileOpen] = useState(false);
   const [inviteCode, setInviteCode] = useState("");
+  const [showInstallOffer, setShowInstallOffer] = useState(false);
+  const [installed, setInstalled] = useState(false);
   const [selected, setSelected] = useState<Match | null>(null),
     [toast, setToast] = useState(""),
     [busy, setBusy] = useState(false);
@@ -235,13 +237,50 @@ export default function TeamApp() {
       setDeferredInstall(event as typeof deferredInstall & Event);
     };
     window.addEventListener("beforeinstallprompt", install);
+    const isStandalone =
+      window.matchMedia("(display-mode: standalone)").matches ||
+      (navigator as Navigator & { standalone?: boolean }).standalone === true;
+    setInstalled(isStandalone);
+    if (!isStandalone) {
+      let dismissed = false;
+      try {
+        dismissed =
+          localStorage.getItem("inkastarna:hide-install-offer") === "1";
+      } catch {
+        // Installation help also works when browser storage is unavailable.
+      }
+      setShowInstallOffer(!dismissed);
+    }
+    const onInstalled = () => {
+      setInstalled(true);
+      setInstallOpen(false);
+      setDeferredInstall(null);
+    };
+    window.addEventListener("appinstalled", onInstalled);
     if ("serviceWorker" in navigator)
       navigator.serviceWorker.register("/sw.js").catch(() => {});
     return () => {
       window.removeEventListener("hashchange", onHash);
       window.removeEventListener("beforeinstallprompt", install);
+      window.removeEventListener("appinstalled", onInstalled);
     };
   }, []);
+  const startInstall = async () => {
+    if (!deferredInstall) {
+      setInstallOpen(true);
+      return;
+    }
+    setDeferredInstall(null);
+    try {
+      await deferredInstall.prompt();
+      if ((await deferredInstall.userChoice).outcome === "accepted") {
+        setInstalled(true);
+        setInstallOpen(false);
+      }
+    } catch {
+      setInstallOpen(true);
+    }
+  };
   const go = (tab: Tab) => {
     setActive(tab);
     window.location.hash = tab;
@@ -517,10 +556,12 @@ export default function TeamApp() {
             </div>
             <ArrowUpRight size={15} />
           </div>
-          <button className="install-nav" onClick={() => setInstallOpen(true)}>
-            <Smartphone size={18} /> Installera appen{" "}
-            <ArrowDownToLine size={16} />
-          </button>
+          {!installed && (
+            <button className="install-nav" onClick={startInstall}>
+              <Smartphone size={18} /> Installera appen{" "}
+              <ArrowDownToLine size={16} />
+            </button>
+          )}
           {session ? (
             <button className="user-menu" onClick={() => setProfileOpen(true)}>
               <span className="avatar">{short(session.user.name)}</span>
@@ -618,13 +659,30 @@ export default function TeamApp() {
                           : "Säsongen, match för match."}
               </p>
             </div>
-            <button
-              className="button subtle heading-action"
-              onClick={() => setInstallOpen(true)}
-            >
-              <Smartphone size={16} /> Lägg till på hemskärmen
-            </button>
           </div>
+          {active === "overview" && showInstallOffer && !installed && (
+            <aside className="install-offer" aria-label="Installera Inkastarna">
+              <div>
+                <strong>Vill du installera Inkastarna?</strong>
+                <p>Öppna lagappen direkt från skrivbordet eller hemskärmen.</p>
+              </div>
+              <button className="button dark" onClick={startInstall}>
+                <ArrowDownToLine size={16} /> Installera appen
+              </button>
+              <button
+                className="icon-button"
+                aria-label="Dölj installationsfrågan"
+                onClick={() => {
+                  setShowInstallOffer(false);
+                  try {
+                    localStorage.setItem("inkastarna:hide-install-offer", "1");
+                  } catch {}
+                }}
+              >
+                <X size={16} />
+              </button>
+            </aside>
+          )}
           {error && (
             <div className="notice error" role="alert">
               {error}
@@ -1299,30 +1357,25 @@ export default function TeamApp() {
       )}
       {installOpen && (
         <Modal
-          title="Inkastarna. Alltid nära."
+          title="Installera Inkastarna"
           onClose={() => setInstallOpen(false)}
         >
           <div className="install-intro">
             <Badge large />
-            <p>
-              En egen plats på hemskärmen.
-              <br />
-              Inga appbutiker. Bara laget.
-            </p>
+            <p>Öppna appen från skrivbordet eller hemskärmen.</p>
           </div>
           {deferredInstall && (
-            <button
-              className="button dark full"
-              onClick={async () => {
-                await deferredInstall.prompt();
-                const choice = await deferredInstall.userChoice;
-                if (choice.outcome === "accepted") setInstallOpen(false);
-                setDeferredInstall(null);
-              }}
-            >
+            <button className="button dark full" onClick={startInstall}>
               Installera Inkastarna <ArrowDownToLine size={18} />
             </button>
           )}
+          <div className="install-step">
+            <strong>Dator · Chrome eller Edge</strong>
+            <p>
+              Klicka på installationsikonen i adressfältet. Du kan också öppna
+              webbläsarens meny och välja <b>Installera sidan som app</b>.
+            </p>
+          </div>
           <div className="install-step">
             <strong>iPhone · Safari</strong>
             <p>
