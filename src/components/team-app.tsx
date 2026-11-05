@@ -121,7 +121,7 @@ function TeamShirt({ size = 24 }: { size?: number }) {
 }
 function StarRating({value,size=14}:{value:number;size?:number}) {
   const shown=Math.max(3,Math.min(5,value));
-  return <span className="rating-stars" aria-label={`${shown.toFixed(1)} av 5 stjärnor`}>{[1,2,3,4,5].map((n)=><Star key={n} size={size} fill={n<=Math.round(shown)?"currentColor":"none"}/>)}</span>;
+  return <span className="rating-stars" aria-label={`${shown.toFixed(1)} av 5 stjärnor`}>{[1,2,3,4,5].map((n)=>{const fill=Math.max(0,Math.min(1,shown-n+1));return <span className="rating-star" data-fill={Math.round(fill*100)} key={n}><Star className="rating-star-outline" size={size}/><Star className="rating-star-fill" size={size} fill="currentColor" style={{clipPath:`inset(0 ${100-fill*100}% 0 0)`}}/></span>;})}</span>;
 }
 function Empty({
   icon: Icon = Flag,
