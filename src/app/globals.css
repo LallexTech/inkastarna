@@ -1,7 +1,7 @@
 @import url("https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800;900&family=DM+Sans:wght@400;450;500;550;600;650;700;750&display=swap");
 
 :root {
-  --paper: #f4f4f6;
+  --paper: #f5f3f4;
   --white: #fff;
   --ink: #202127;
   --muted: #5e606b;
@@ -12,13 +12,13 @@
   --dark-raised: #26262f;
   --dark-line: #383842;
   --inverse-muted: #c4c5d0;
-  --accent: #b82030;
-  --accent-bright: #ff747e;
-  --accent-ink: #891d2b;
-  --accent-wash: #fbe9ec;
-  --accent-line: #e8b4bd;
-  --accent-glow: #ff747e18;
-  --accent-halo: #ff747e38;
+  --accent: #d9152b;
+  --accent-bright: #ff4053;
+  --accent-ink: #9f1022;
+  --accent-wash: #ffeaed;
+  --accent-line: #efadb6;
+  --accent-glow: #ff405318;
+  --accent-halo: #ff405338;
   --blue: #245b9e;
   --blue-bright: #91bcff;
   --blue-ink: #234d81;
@@ -1302,6 +1302,9 @@ tr.highlight td {
   display: block;
   margin-bottom: 7px;
 }
+.lineup-select label:not(:first-child) {
+  margin-top: 12px;
+}
 .lineup-select select {
   width: 100%;
   border: 1px solid var(--line);
@@ -1381,6 +1384,26 @@ tr.highlight td {
 }
 .slot-4 {
   bottom: 35px;
+}
+.formation.two-two .slot-0,
+.formation.two-two .slot-1 {
+  top: 145px;
+}
+.formation.two-two .slot-0 {
+  left: calc(25% - 60px);
+}
+.formation.two-two .slot-1 {
+  left: calc(75% - 60px);
+}
+.formation.two-two .slot-2,
+.formation.two-two .slot-3 {
+  top: 260px;
+}
+.formation.two-two .slot-2 {
+  left: calc(25% - 60px);
+}
+.formation.two-two .slot-3 {
+  left: calc(75% - 60px);
 }
 .shirt-token {
   position: relative;
@@ -1786,6 +1809,27 @@ tr.highlight td {
   margin: 12px 0;
   color: var(--muted);
   line-height: 1.7;
+}
+.leaders-panel {
+  margin-top: 22px;
+}
+.leaders-panel > .panel-foot {
+  padding: 0 22px 16px;
+  line-height: 1.6;
+}
+.leader-list {
+  padding: 0 22px 18px;
+}
+.leader-list > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+.leader-list small {
+  color: var(--muted);
 }
 .form-columns {
   display: grid;
