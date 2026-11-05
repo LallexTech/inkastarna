@@ -423,10 +423,6 @@ h1 {
 .button.full {
   width: 100%;
 }
-.heading-action {
-  font-size: 10px;
-  padding: 11px 13px;
-}
 .match-hero {
   background: #19392e;
   min-height: 333px;
@@ -1560,6 +1556,24 @@ tr.highlight td {
 .logout {
   color: #9c7763;
 }
+.install-offer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f1f8df;
+}
+.install-offer > div {
+  flex: 1 1 200px;
+}
+.install-offer p {
+  margin-top: 4px;
+  font-size: 12px;
+}
 .install-intro {
   display: flex;
   align-items: center;
@@ -1859,9 +1873,6 @@ tr.highlight td {
   }
   main {
     padding: 32px 28px 0;
-  }
-  .heading-action {
-    display: none;
   }
   .hero-art {
     left: 53%;
