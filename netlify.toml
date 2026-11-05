@@ -1,0 +1,19 @@
+"$schema" = "https://open-api.netlify.com/netlify.schema.json"
+
+[build]
+  command = "npm run db:migrate && npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "24"
+  NEXT_TELEMETRY_DISABLED = "1"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+# Next.js routes and authenticated responses are handled by Netlify's OpenNext
+# adapter. Do not add SPA rewrites or cache private API responses at the CDN.
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
