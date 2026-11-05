@@ -1121,6 +1121,33 @@ tr.highlight td {
 .source-link:hover {
   text-decoration: underline;
 }
+.history-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin: 18px 0 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.history-toolbar select {
+  min-width: 170px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 9px 32px 9px 11px;
+  background: var(--white);
+  color: var(--ink);
+}
+.history-toolbar select:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+.archive-results {
+  margin-top: 21px;
+}
+.archive-results .source-link {
+  margin: 0 22px 20px;
+}
 .season-breakdown {
   padding: 10px 23px 24px;
   display: grid;
@@ -1158,6 +1185,8 @@ tr.highlight td {
   padding: 35px;
 }
 .form-badge {
+  display: inline-grid;
+  place-items: center;
   height: 45px;
   width: 45px;
   border-radius: 50%;
