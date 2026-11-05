@@ -6,8 +6,38 @@ import { z } from "zod";
 const bodySchema = z.discriminatedUnion("type", [
   z.object({type:z.literal("open"),matchId:z.number().int().positive()}),
   z.object({type:z.literal("close"),matchId:z.number().int().positive()}),
+  z.object({type:z.literal("delete"),matchId:z.number().int().positive()}),
   z.object({type:z.literal("vote"),matchId:z.number().int().positive(),motmPlayerId:z.string().nullable(),ratings:z.array(z.object({playerId:z.string(),stars:z.number().int().min(1).max(5)})).max(100)}),
 ]);
+
+async function pickMotmWinner(matchId:number) {
+  const result=await db.query(`SELECT v.motm_player_id AS "playerId",COUNT(DISTINCT v.voter_user_id)::int AS votes,COALESCE(SUM(given.stars),0)::int AS "starsGiven"
+    FROM match_vote v
+    JOIN match_presence target ON target.match_id=v.match_id AND target.player_id=v.motm_player_id AND target.status='played'
+    JOIN roster voter ON voter.user_id=v.voter_user_id
+    JOIN match_presence vp ON vp.match_id=v.match_id AND vp.player_id=voter.id AND vp.status IN ('played','spectator')
+    LEFT JOIN match_rating given ON given.match_id=v.match_id AND given.voter_user_id=v.voter_user_id
+    WHERE v.match_id=$1 AND v.motm_player_id IS NOT NULL
+    GROUP BY v.motm_player_id`,[matchId]);
+  if (!result.rowCount) return null;
+  const maxVotes=Math.max(...result.rows.map((row)=>Number(row.votes)));
+  const voteLeaders=result.rows.filter((row)=>Number(row.votes)===maxVotes);
+  const maxStars=Math.max(...voteLeaders.map((row)=>Number(row.starsGiven)));
+  const finalLeaders=voteLeaders.filter((row)=>Number(row.starsGiven)===maxStars);
+  return String(finalLeaders[Math.floor(Math.random()*finalLeaders.length)].playerId);
+}
+
+async function getMotmWinner(matchId:number,closed:boolean) {
+  if (!closed) return null;
+  const existing=await db.query("SELECT motm_winner_id AS winner FROM match_ballot WHERE match_id=$1",[matchId]);
+  if (existing.rows[0]?.winner) return String(existing.rows[0].winner);
+  const winner=await pickMotmWinner(matchId);
+  if (!winner) return null;
+  const saved=await db.query("UPDATE match_ballot SET motm_winner_id=$2 WHERE match_id=$1 AND closed_at IS NOT NULL AND motm_winner_id IS NULL RETURNING motm_winner_id AS winner",[matchId,winner]);
+  if (saved.rowCount) return String(saved.rows[0].winner);
+  const current=await db.query("SELECT motm_winner_id AS winner FROM match_ballot WHERE match_id=$1",[matchId]);
+  return current.rows[0]?.winner ? String(current.rows[0].winner) : winner;
+}
 
 async function validMatch(matchId:number) {
   const [snapshot,friendly]=await Promise.all([db.query("SELECT data FROM league_snapshot WHERE id=1"),db.query("SELECT id FROM friendly_match WHERE id=$1",[matchId])]);
@@ -34,7 +64,9 @@ export async function GET(request:Request) {
   ]);
   const isOpen=Boolean(ballot.rows[0] && !ballot.rows[0].closedAt);
   const eligible=Boolean(myRoster.rows[0] && presence.rows.some((p)=>p.userId===session.user.id && ["played","spectator"].includes(p.status)));
-  return Response.json({open:isOpen,closed:Boolean(ballot.rows[0]?.closedAt),eligible,players:candidates.rows,presence:presence.rows.map(({userId,...p})=>p),ratings:ratings.rows,motm:motms.rows,ownBallot:myVote.rows[0]??null,ownRatings:myRatings.rows},{headers:{"Cache-Control":"private, no-store"}});
+  const closed=Boolean(ballot.rows[0]?.closedAt);
+  const winnerId=await getMotmWinner(matchId,closed);
+  return Response.json({open:isOpen,closed,eligible,players:candidates.rows,presence:presence.rows.map(({userId,...p})=>p),ratings:ratings.rows.map(({count,...r})=>({...r,average:Math.max(3,Number(r.average))})),winnerId,ownBallot:myVote.rows[0]??null,ownRatings:myRatings.rows},{headers:{"Cache-Control":"private, no-store"}});
 }
 
 export async function POST(request:Request) {
@@ -52,14 +84,28 @@ export async function POST(request:Request) {
       const [played,existing]=await Promise.all([db.query("SELECT 1 FROM match_presence WHERE match_id=$1 AND status='played' LIMIT 1",[data.matchId]),db.query("SELECT closed_at FROM match_ballot WHERE match_id=$1",[data.matchId])]);
       if (!played.rowCount) return Response.json({error:"Markera minst en spelare som deltagit innan omröstningen öppnas."},{status:409});
       if (existing.rows[0]?.closed_at) {
-        await db.query("UPDATE match_ballot SET opened_by=$2,opened_at=now(),closed_by=NULL,closed_at=NULL WHERE match_id=$1",[data.matchId,session.user.id]);
+        await db.query("UPDATE match_ballot SET opened_by=$2,opened_at=now(),closed_by=NULL,closed_at=NULL,motm_winner_id=NULL WHERE match_id=$1",[data.matchId,session.user.id]);
       } else {
         await db.query("INSERT INTO match_ballot(match_id,opened_by) VALUES($1,$2) ON CONFLICT(match_id) DO NOTHING",[data.matchId,session.user.id]);
       }
     } else {
-      const closed=await db.query("UPDATE match_ballot SET closed_by=$2,closed_at=now() WHERE match_id=$1 AND closed_at IS NULL RETURNING match_id",[data.matchId,session.user.id]);
+      const winner=await pickMotmWinner(data.matchId);
+      const closed=await db.query("UPDATE match_ballot SET closed_by=$2,closed_at=now(),motm_winner_id=$3 WHERE match_id=$1 AND closed_at IS NULL RETURNING match_id",[data.matchId,session.user.id,winner]);
       if (!closed.rowCount) return Response.json({error:"Omröstningen är inte öppen."},{status:409});
     }
+    return Response.json({ok:true});
+  }
+  if (data.type==="delete") {
+    if (!(await isTeamLeader(session.user.id,session.user.email))) return Response.json({error:"Bara lagledare kan ta bort omröstningar."},{status:403});
+    const client=await db.connect();
+    try {
+      await client.query("BEGIN");
+      const ballot=await client.query("SELECT closed_at FROM match_ballot WHERE match_id=$1 FOR UPDATE",[data.matchId]);
+      if (!ballot.rows[0]?.closed_at) { await client.query("ROLLBACK"); return Response.json({error:"Bara en avslutad omröstning kan tas bort."},{status:409}); }
+      await client.query("DELETE FROM match_vote WHERE match_id=$1",[data.matchId]);
+      await client.query("DELETE FROM match_ballot WHERE match_id=$1",[data.matchId]);
+      await client.query("COMMIT");
+    } catch(e) { await client.query("ROLLBACK"); throw e; } finally { client.release(); }
     return Response.json({ok:true});
   }
   const ballot=await db.query("SELECT closed_at FROM match_ballot WHERE match_id=$1",[data.matchId]);

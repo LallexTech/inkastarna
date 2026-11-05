@@ -69,7 +69,7 @@ export type TeamData = {
   friendlyMatches: Match[];
   matchPresence: { matchId: number; playerId: string; status: "played" | "spectator" | "absent" }[];
   ballots: { matchId: number; open: boolean; closed: boolean }[];
-  ratings: { matchId: number; playerId: string; average: number | null; count: number; motm: number; winner: boolean }[];
+  ratings: { matchId: number; playerId: string; average: number | null; winner: boolean }[];
   seasonRatings: { playerId: string; average: number | null; matches: number; motm: number }[];
   playerMatchStats: { matchId: number; playerId: string; goals: number; assists: number; played: boolean }[];
 };
