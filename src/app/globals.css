@@ -1856,6 +1856,8 @@ tr.highlight td {
 .rating-results { display:grid; margin:16px 0; }
 .rating-results > div { display:grid; grid-template-columns:1fr auto; gap:3px 12px; padding:10px 0; border-bottom:1px solid var(--line); }
 .rating-results small { grid-column:2; color:var(--muted); text-align:right; }
+.rating-stars { display:inline-flex; align-items:center; gap:1px; color:var(--warning-ink); vertical-align:-2px; white-space:nowrap; }
+.motm-winner-row { order:-1; font-weight:700; }
 .motm-result { display:flex; align-items:center; gap:8px; background:var(--accent-wash); color:var(--accent-ink); padding:12px; margin-top:13px; border-radius:6px; }
 .motm-result span { margin-left:auto; font-size:10px; }
 .vote-form { display:grid; gap:13px; margin-top:18px; }
@@ -1865,11 +1867,12 @@ tr.highlight td {
 .star-choices { display:flex; gap:5px; }
 .star-choices label { flex:1; }
 .star-choices input { position:absolute; opacity:0; pointer-events:none; }
-.star-choices span { display:grid; place-items:center; padding:9px 4px; border:1px solid var(--line); border-radius:4px; color:var(--muted); font-size:10px; cursor:pointer; }
+.star-choices span { display:flex; justify-content:center; gap:2px; padding:9px 4px; border:1px solid var(--line); border-radius:4px; color:var(--muted); cursor:pointer; }
 .star-choices input:checked + span { background:var(--warning-wash); border-color:var(--warning-line); color:var(--warning-ink); }
 .star-choices input:focus-visible + span { outline:3px solid var(--blue); outline-offset:2px; }
 .motm-choice { display:flex; align-items:center; gap:8px; margin-top:10px; font-size:11px; }
 .vote-admin-actions { display:flex; justify-content:flex-end; margin-top:13px; }
+.vote-admin-actions .danger,.button.danger { color:var(--danger-ink,#a3272d); border-color:var(--danger-line,#e5b7b9); background:var(--danger-wash,#fff1f1); }
 .presence-form { display:grid; gap:8px; margin-top:12px; }
 .presence-form > label { display:flex; justify-content:space-between; align-items:center; gap:12px; border-bottom:1px solid var(--line); padding:8px 0; }
 .presence-form select { border:1px solid var(--line); border-radius:5px; padding:8px; background:white; }

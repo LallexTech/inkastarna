@@ -15,7 +15,8 @@ const rosterPlayer = z.object({ type: z.literal("rosterPlayer"), playerId: z.str
 const stats = z.object({ type: z.literal("stats"), matchId: z.number().int().positive(), playerId: z.string(), goals: z.number().int().min(0).max(100), assists: z.number().int().min(0).max(100), played: z.boolean() });
 const presence = z.object({ type: z.literal("presence"), matchId: z.number().int().positive(), players: z.array(z.object({ playerId: z.string().min(1), status: z.enum(["played", "spectator", "absent"]) })).max(100) });
 const friendlyMatch = z.object({ type: z.literal("friendlyMatch"), matchId: z.number().int().positive().optional(), opponent: z.string().trim().min(1).max(100), startsAt: z.string().datetime(), homeScore:z.number().int().min(0).max(100).nullable().optional(), awayScore:z.number().int().min(0).max(100).nullable().optional() });
-const schema = z.discriminatedUnion("type", [attendance, profile, lineup, teamLeader, teamAdmin, rosterPlayer, stats, presence, friendlyMatch]);
+const deleteFriendlyMatch = z.object({type:z.literal("deleteFriendlyMatch"),matchId:z.number().int().positive()});
+const schema = z.discriminatedUnion("type", [attendance, profile, lineup, teamLeader, teamAdmin, rosterPlayer, stats, presence, friendlyMatch, deleteFriendlyMatch]);
 
 export async function GET(request: Request) {
   const session = await auth.api.getSession({ headers: request.headers });
@@ -31,8 +32,8 @@ export async function GET(request: Request) {
     db.query("SELECT id,opponent,starts_at AS \"startsAt\",home_score AS \"homeScore\",away_score AS \"awayScore\" FROM friendly_match ORDER BY starts_at DESC"),
     db.query('SELECT match_id AS "matchId",player_id AS "playerId",status FROM match_presence'),
     db.query('SELECT match_id AS "matchId",closed_at IS NULL AS open,closed_at IS NOT NULL AS closed FROM match_ballot'),
-    db.query(`SELECT mr.match_id AS "matchId",mr.player_id AS "playerId",AVG(mr.stars)::float AS average,COUNT(*)::int AS count FROM match_rating mr JOIN match_presence target ON target.match_id=mr.match_id AND target.player_id=mr.player_id AND target.status='played' JOIN match_vote v ON v.match_id=mr.match_id AND v.voter_user_id=mr.voter_user_id JOIN roster voter ON voter.user_id=v.voter_user_id JOIN match_presence vp ON vp.match_id=v.match_id AND vp.player_id=voter.id AND vp.status IN ('played','spectator') GROUP BY mr.match_id,mr.player_id`),
-    db.query(`SELECT v.match_id AS "matchId",v.motm_player_id AS "playerId",COUNT(*)::int AS count,BOOL_AND(b.closed_at IS NOT NULL) AS closed FROM match_vote v JOIN match_ballot b ON b.match_id=v.match_id JOIN roster voter ON voter.user_id=v.voter_user_id JOIN match_presence vp ON vp.match_id=v.match_id AND vp.player_id=voter.id AND vp.status IN ('played','spectator') JOIN match_presence target ON target.match_id=v.match_id AND target.player_id=v.motm_player_id AND target.status='played' WHERE v.motm_player_id IS NOT NULL GROUP BY v.match_id,v.motm_player_id`),
+    db.query(`SELECT mr.match_id AS "matchId",mr.player_id AS "playerId",AVG(mr.stars)::float AS average,COUNT(*)::int AS count FROM match_rating mr JOIN match_presence target ON target.match_id=mr.match_id AND target.player_id=mr.player_id AND target.status='played' JOIN match_vote v ON v.match_id=mr.match_id AND v.voter_user_id=mr.voter_user_id JOIN match_ballot b ON b.match_id=mr.match_id AND b.closed_at IS NOT NULL JOIN roster voter ON voter.user_id=v.voter_user_id JOIN match_presence vp ON vp.match_id=v.match_id AND vp.player_id=voter.id AND vp.status IN ('played','spectator') GROUP BY mr.match_id,mr.player_id`),
+    db.query(`SELECT v.match_id AS "matchId",v.motm_player_id AS "playerId",COUNT(*)::int AS count,BOOL_AND(b.closed_at IS NOT NULL) AS closed,MAX(b.motm_winner_id) AS "winnerId" FROM match_vote v JOIN match_ballot b ON b.match_id=v.match_id JOIN roster voter ON voter.user_id=v.voter_user_id JOIN match_presence vp ON vp.match_id=v.match_id AND vp.player_id=voter.id AND vp.status IN ('played','spectator') JOIN match_presence target ON target.match_id=v.match_id AND target.player_id=v.motm_player_id AND target.status='played' WHERE v.motm_player_id IS NOT NULL GROUP BY v.match_id,v.motm_player_id`),
     db.query("SELECT id FROM roster WHERE user_id=$1", [session.user.id]),
     db.query('SELECT match_id AS "matchId",player_id AS "playerId",goals,assists,played FROM player_stats'),
   ]);
@@ -41,27 +42,27 @@ export async function GET(request: Request) {
   const officialIds = new Set((league?.matches ?? []).filter((m) => m.finished && (m.homeId === league?.teamId || m.awayId === league?.teamId)).map((m) => m.id));
   const matchRatings = ratings.rows.map((r) => {
     const closedMotms=motms.rows.filter((m) => m.matchId === r.matchId && m.closed);
-    const most=closedMotms.reduce((n,m)=>Math.max(n,Number(m.count)),0);
-    return { ...r, motm: Number(motms.rows.find((m) => m.matchId === r.matchId && m.playerId === r.playerId && m.closed)?.count ?? 0), winner: Boolean(most && closedMotms.some((m)=>m.playerId===r.playerId && Number(m.count)===most)) };
+    return { matchId:r.matchId,playerId:r.playerId,average:r.average,winner: Boolean(closedMotms.find((m)=>m.winnerId===r.playerId)) };
   });
   const seasonRatings = new Map<string,{ total:number; count:number; matches:Set<number>; motm:number }>();
-  for (const r of ratings.rows) if (officialIds.has(Number(r.matchId))) {
+  const statisticMatchIds=new Set([...officialIds,...friendlies.rows.map((m)=>Number(m.id))]);
+  for (const r of ratings.rows) if (statisticMatchIds.has(Number(r.matchId))) {
     const v=seasonRatings.get(r.playerId) ?? { total:0,count:0,matches:new Set<number>(),motm:0 };
     v.total += Number(r.average)*Number(r.count); v.count += Number(r.count); v.matches.add(Number(r.matchId)); seasonRatings.set(r.playerId,v);
   }
   const officialMotmByMatch=new Map<number,typeof motms.rows>();
-  for (const m of motms.rows) if (officialIds.has(Number(m.matchId)) && m.closed) officialMotmByMatch.set(Number(m.matchId),[...(officialMotmByMatch.get(Number(m.matchId))??[]),m]);
+  for (const m of motms.rows) if (statisticMatchIds.has(Number(m.matchId)) && m.closed) officialMotmByMatch.set(Number(m.matchId),[...(officialMotmByMatch.get(Number(m.matchId))??[]),m]);
   for (const [matchId,rows] of officialMotmByMatch) {
-    const max=rows.reduce((n,m)=>Math.max(n,Number(m.count)),0);
-    for (const m of rows.filter((x)=>Number(x.count)===max)) { const v=seasonRatings.get(m.playerId) ?? {total:0,count:0,matches:new Set<number>(),motm:0}; v.motm++; seasonRatings.set(m.playerId,v); }
+    const winner=rows.find((x)=>x.winnerId);
+    if (winner) { const v=seasonRatings.get(winner.playerId) ?? {total:0,count:0,matches:new Set<number>(),motm:0}; v.motm++; seasonRatings.set(winner.playerId,v); }
   }
   const friendlyMatches = friendlies.rows.map((m) => ({ id:m.id, startsAt:new Date(m.startsAt).toISOString(), location:"Träningsmatch", finished:true, home:"Inkastarna", away:m.opponent, homeId:27757, awayId:0, homeScore:m.homeScore===null?null:Number(m.homeScore), awayScore:m.awayScore===null?null:Number(m.awayScore), friendly:true }));
   return Response.json({
     players: players.rows.map(({ user_id, email, hasPhoto, ...p }) => ({ ...p, rootAdmin:isAdmin(email ?? ""), admin:Boolean(p.admin || isAdmin(email ?? "")), photoUrl:hasPhoto ? `/api/player-photo?id=${encodeURIComponent(p.id)}` : null })),
     attendance:responses.rows, lineups:lineups.rows, teamLeads:teamLeads.rows.map((r)=>r.id), teamAdmins:teamAdmins.rows.map((r)=>r.id), admin, leader,
     ...(admin ? { inviteCode:process.env.TEAM_JOIN_CODE } : {}), userId:session.user.id, playerId:currentPlayer.rows[0]?.id ?? null,
-    friendlyMatches, matchPresence:presences.rows, ballots:ballots.rows, ratings:matchRatings,
-    seasonRatings:[...seasonRatings.entries()].map(([playerId,v])=>({playerId,average:v.count ? v.total/v.count : null,matches:v.matches.size,motm:v.motm})), playerMatchStats:playerMatchStats.rows,
+    friendlyMatches, matchPresence:presences.rows, ballots:ballots.rows, ratings:matchRatings.map((r)=>({...r,average:Math.max(3,Number(r.average))})),
+    seasonRatings:[...seasonRatings.entries()].map(([playerId,v])=>({playerId,average:v.count ? Math.max(3,v.total/v.count) : null,matches:v.matches.size,motm:v.motm})), playerMatchStats:playerMatchStats.rows,
   }, { headers:{ "Cache-Control":"private, no-store" } });
 }
 
@@ -114,6 +115,21 @@ export async function POST(request: Request) {
       const updated=await db.query("UPDATE friendly_match SET opponent=$2,starts_at=$3,home_score=$4,away_score=$5 WHERE id=$1",[data.matchId,data.opponent,new Date(data.startsAt),data.homeScore??null,data.awayScore??null]);
       if (!updated.rowCount) return Response.json({error:"Träningsmatchen finns inte."},{status:404});
     } else await db.query("INSERT INTO friendly_match(opponent,starts_at,created_by,home_score,away_score) VALUES($1,$2,$3,$4,$5)",[data.opponent,new Date(data.startsAt),session.user.id,data.homeScore??null,data.awayScore??null]);
+  } else if (data.type === "deleteFriendlyMatch") {
+    if (!leader) return Response.json({error:"Bara lagledare kan ta bort träningsmatcher."},{status:403});
+    const client=await db.connect();
+    try { await client.query("BEGIN");
+      const exists=await client.query("SELECT id FROM friendly_match WHERE id=$1 FOR UPDATE",[data.matchId]);
+      if (!exists.rowCount) { await client.query("ROLLBACK"); return Response.json({error:"Träningsmatchen finns inte."},{status:404}); }
+      await client.query("DELETE FROM match_vote WHERE match_id=$1",[data.matchId]);
+      await client.query("DELETE FROM match_ballot WHERE match_id=$1",[data.matchId]);
+      await client.query("DELETE FROM match_presence WHERE match_id=$1",[data.matchId]);
+      await client.query("DELETE FROM player_stats WHERE match_id=$1",[data.matchId]);
+      await client.query("DELETE FROM lineup WHERE match_id=$1",[data.matchId]);
+      await client.query("DELETE FROM attendance WHERE match_id=$1",[data.matchId]);
+      await client.query("DELETE FROM friendly_match WHERE id=$1",[data.matchId]);
+      await client.query("COMMIT");
+    } catch(e) { await client.query("ROLLBACK"); throw e; } finally { client.release(); }
   } else if (data.type === "presence") {
     if (!leader) return Response.json({error:"Bara lagledare kan ändra närvaro."},{status:403});
     const {league}=await readLeague();

@@ -91,6 +91,7 @@ await db.query(`
     opened_by text NOT NULL REFERENCES "user"(id), opened_at timestamptz NOT NULL DEFAULT now(),
     closed_by text REFERENCES "user"(id), closed_at timestamptz
   );
+  ALTER TABLE match_ballot ADD COLUMN IF NOT EXISTS motm_winner_id text REFERENCES roster(id) ON DELETE SET NULL;
   CREATE TABLE IF NOT EXISTS match_vote (
     match_id integer NOT NULL,
     voter_user_id text NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
@@ -105,6 +106,31 @@ await db.query(`
     PRIMARY KEY(match_id,voter_user_id,player_id),
     FOREIGN KEY(match_id,voter_user_id) REFERENCES match_vote(match_id,voter_user_id) ON DELETE CASCADE
   );
+  WITH motm_votes AS (
+    SELECT v.match_id,v.motm_player_id,
+      COUNT(DISTINCT v.voter_user_id)::int AS votes
+    FROM match_vote v
+    JOIN match_presence target ON target.match_id=v.match_id AND target.player_id=v.motm_player_id AND target.status='played'
+    JOIN roster voter ON voter.user_id=v.voter_user_id
+    JOIN match_presence vp ON vp.match_id=v.match_id AND vp.player_id=voter.id AND vp.status IN ('played','spectator')
+    JOIN match_ballot b ON b.match_id=v.match_id AND b.closed_at IS NOT NULL AND b.motm_winner_id IS NULL
+    WHERE v.motm_player_id IS NOT NULL
+    GROUP BY v.match_id,v.motm_player_id
+  ), stars_given AS (
+    SELECT v.match_id,voter.id AS player_id,COALESCE(SUM(rating.stars),0)::int AS stars_given
+    FROM match_vote v
+    JOIN roster voter ON voter.user_id=v.voter_user_id
+    JOIN match_presence vp ON vp.match_id=v.match_id AND vp.player_id=voter.id AND vp.status IN ('played','spectator')
+    LEFT JOIN match_rating rating ON rating.match_id=v.match_id AND rating.voter_user_id=v.voter_user_id
+    JOIN match_ballot b ON b.match_id=v.match_id AND b.closed_at IS NOT NULL AND b.motm_winner_id IS NULL
+    GROUP BY v.match_id,voter.id
+  ), ranked AS (
+    SELECT mv.match_id,mv.motm_player_id,
+      ROW_NUMBER() OVER(PARTITION BY mv.match_id ORDER BY mv.votes DESC,COALESCE(sg.stars_given,0) DESC,random()) AS position
+    FROM motm_votes mv LEFT JOIN stars_given sg ON sg.match_id=mv.match_id AND sg.player_id=mv.motm_player_id
+  )
+  UPDATE match_ballot b SET motm_winner_id=r.motm_player_id
+    FROM ranked r WHERE b.match_id=r.match_id AND r.position=1 AND b.motm_winner_id IS NULL;
   CREATE UNIQUE INDEX IF NOT EXISTS unique_player_account_name ON "user"(lower(name));
 `);
 const initialRoster = (process.env.INITIAL_ROSTER ?? "")
