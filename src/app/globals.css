@@ -1839,6 +1839,26 @@ tr.highlight td {
   color: var(--muted);
   line-height: 1.7;
 }
+.pending-results { margin-top:18px; border-top:1px solid var(--line); padding-top:14px; }
+.pending-results summary { cursor:pointer; font-weight:650; font-size:12px; }
+.pending-results > p { margin:9px 0 12px; color:var(--muted); font-size:11px; line-height:1.6; }
+.match-comments { margin-top:24px; border-top:1px solid var(--line); padding-top:20px; }
+.comments-heading { display:flex; align-items:center; justify-content:space-between; }
+.comments-heading h3 { font:600 26px var(--heading); }
+.comments-heading > span { color:var(--muted); font-size:11px; }
+.comments-list { display:grid; gap:12px; margin:14px 0; }
+.match-comment { padding:12px; border:1px solid var(--line); border-radius:7px; }
+.comment-meta { display:flex; justify-content:space-between; align-items:baseline; gap:10px; }
+.comment-meta strong { font-size:12px; }
+.comment-meta time,.comment-actions small { color:var(--muted); font-size:10px; }
+.comment-body { margin:9px 0 0; font-size:12px; line-height:1.65; white-space:pre-wrap; overflow-wrap:anywhere; }
+.comment-form { display:grid; gap:9px; margin-top:12px; }
+.comment-form label { font-size:11px; font-weight:650; }
+.comment-form textarea { width:100%; resize:vertical; min-height:86px; border:1px solid var(--line); border-radius:6px; padding:10px; font:inherit; font-size:12px; line-height:1.5; }
+.comment-actions { display:flex; justify-content:flex-end; align-items:center; gap:9px; }
+.comment-actions .auth-switch { margin:0; padding:4px 0; font-size:10px; }
+.new-comment .comment-actions { justify-content:space-between; }
+.comment-login { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:12px; color:var(--muted); font-size:11px; }
 .role-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:7px; }
 .role-actions .button { font-size:9px; padding:8px 10px; }
 .player-card-photo { height:0; position:relative; z-index:1; }

@@ -380,7 +380,8 @@ export default function TeamApp() {
     upcoming = matches.filter(
       (m) => !m.finished && new Date(m.startsAt).getTime() > Date.now(),
     ),
-    played = matches.filter((m) => m.finished).sort((a,b)=>new Date(b.startsAt).getTime()-new Date(a.startsAt).getTime());
+    played = matches.filter((m) => m.finished).sort((a,b)=>new Date(b.startsAt).getTime()-new Date(a.startsAt).getTime()),
+    awaitingResult = matches.filter((m) => !m.finished && !m.friendly && new Date(m.startsAt).getTime() <= Date.now()).sort((a,b)=>new Date(b.startsAt).getTime()-new Date(a.startsAt).getTime());
   const next = upcoming[0],
     standing = league?.standings.find((s) => s.team === "Inkastarna");
   const totalPlayed = standing?.played ?? 0;
@@ -1009,8 +1010,15 @@ export default function TeamApp() {
                     </div>
                     {active === "played" && team?.leader ? <button className="button subtle" onClick={()=>setFriendlyEditor(null)}><Plus size={15}/> Träningsmatch</button> : <CalendarDays size={21} />}
                   </div>
-                  {(active === "upcoming" ? upcoming : played).length ? (
-                    (active === "upcoming" ? upcoming : played).map(matchRow)
+                  {(active === "upcoming" ? upcoming : played).length || (active === "played" && awaitingResult.length) ? (
+                    <>
+                    {(active === "upcoming" ? upcoming : played).map(matchRow)}
+                    {active === "played" && awaitingResult.length > 0 && <details className="pending-results">
+                      <summary>Spelade matcher som väntar på Korpen ({awaitingResult.length})</summary>
+                      <p>Matchdatumet har passerat. Lagledaren kan redan registrera närvaro, mål och assist här.</p>
+                      {awaitingResult.map(matchRow)}
+                    </details>}
+                    </>
                   ) : (
                     <Empty
                       title={
@@ -1267,8 +1275,9 @@ export default function TeamApp() {
                         </Empty>
                       )}
                       <div className="panel-foot">
-                        Matchstatistik registreras från detaljvyn för en spelad
-                        match. Resultat hämtas från Korpen.
+                        Matchstatistik registreras från detaljvyn för spelade
+                        matcher. Träningsmatcher räknas med när lagledaren har
+                        valt det i matchen.
                       </div>
                     </section>
                   )}
@@ -1648,7 +1657,7 @@ export default function TeamApp() {
       {friendlyEditor !== undefined && team?.leader && <FriendlyMatchEditorModal match={friendlyEditor} busy={busy} onClose={()=>setFriendlyEditor(undefined)} onSave={save} />}
       {selected && (
         <Modal
-          title={selected.finished ? "Matchresultat" : "Match & kallelse"}
+          title={selected.finished ? "Matchresultat" : new Date(selected.startsAt).getTime() <= Date.now() ? "Registrera matchen" : "Match & kallelse"}
           onClose={() => setSelected(null)}
         >
           <p className="modal-kicker">
@@ -1668,7 +1677,7 @@ export default function TeamApp() {
             <b>
               {selected.finished
                 ? `${selected.homeScore ?? "–"} : ${selected.awayScore ?? "–"}`
-                : "VS"}
+                : new Date(selected.startsAt).getTime() <= Date.now() ? "Resultat inväntas" : "VS"}
             </b>
             <div>
               <Badge name={selected.away} large />
@@ -1781,11 +1790,10 @@ export default function TeamApp() {
                 </div>
               </>
             )}
-          {selected.finished && team?.leader && !selected.friendly && (
-            <MatchStats match={selected} team={team} save={save} busy={busy} />
-          )}
-          {selected.finished && team?.leader && <MatchPresence match={selected} team={team} save={save} busy={busy} />}
+          {team?.leader && (selected.finished || new Date(selected.startsAt).getTime() <= Date.now()) && <MatchPresence match={selected} team={team} save={save} busy={busy} />}
+          {(selected.finished || new Date(selected.startsAt).getTime() <= Date.now()) && team?.leader && <MatchStats match={selected} team={team} save={save} busy={busy} />}
           {selected.finished && session && voteDetail && <MatchVoting match={selected} detail={voteDetail} team={team} busy={busy} onAction={(data)=>voteAction(data,selected.id)} />}
+          <MatchComments matchId={selected.id} signedIn={Boolean(session)} notify={notify} onLogin={() => setAuthOpen(true)} />
           {!selected.friendly && <a
             className="source-link"
             href={`https://korpenstockholm.zoezi.se/match/${selected.id}`}
@@ -1798,6 +1806,59 @@ export default function TeamApp() {
       )}
     </div>
   );
+}
+
+type MatchComment = {
+  id: number;
+  authorName: string;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+  canEdit: boolean;
+};
+
+function MatchComments({matchId,signedIn,notify,onLogin}:{matchId:number;signedIn:boolean;notify:(message:string)=>void;onLogin:()=>void}) {
+  const [comments,setComments]=useState<MatchComment[]>([]);
+  const [canComment,setCanComment]=useState(false);
+  const [loading,setLoading]=useState(false);
+  const [saving,setSaving]=useState(false);
+  const [draft,setDraft]=useState("");
+  const [editingId,setEditingId]=useState<number|null>(null);
+  const refresh=useCallback(async()=>{
+    setLoading(true);
+    try {
+      const response=await fetch(`/api/match-comments?matchId=${matchId}`,{cache:"no-store"});
+      const data=await response.json();
+      if (!response.ok) throw new Error(data.error||"Kommentarerna kunde inte hämtas.");
+      setComments(data.comments); setCanComment(data.canComment);
+    } catch(e) { setComments([]); setCanComment(false); notify(e instanceof Error?e.message:"Kommentarerna kunde inte hämtas."); }
+    finally { setLoading(false); }
+  },[matchId,notify]);
+  useEffect(()=>{setDraft("");setEditingId(null);if(signedIn)void refresh();else{setComments([]);setCanComment(false);}},[matchId,signedIn,refresh]);
+  async function submit(type:"create"|"update",commentId?:number) {
+    setSaving(true);
+    try {
+      const response=await fetch("/api/match-comments",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type,...(type==="create"?{matchId}:{commentId}),body:draft})});
+      const data=await response.json();
+      if (!response.ok) throw new Error(data.error||"Kommentaren kunde inte sparas.");
+      setDraft("");setEditingId(null);await refresh();notify(type==="create"?"Kommentaren är publicerad.":"Kommentaren är uppdaterad.");
+    } catch(e) { notify(e instanceof Error?e.message:"Kommentaren kunde inte sparas."); }
+    finally { setSaving(false); }
+  }
+  async function remove(commentId:number) {
+    if(!window.confirm("Ta bort kommentaren?"))return;
+    setSaving(true);
+    try {
+      const response=await fetch("/api/match-comments",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"delete",commentId})});
+      const data=await response.json();if(!response.ok)throw new Error(data.error||"Kommentaren kunde inte tas bort.");
+      await refresh();notify("Kommentaren är borttagen.");
+    } catch(e) { notify(e instanceof Error?e.message:"Kommentaren kunde inte tas bort."); }
+    finally { setSaving(false); }
+  }
+  return <section className="match-comments"><div className="comments-heading"><div><span className="section-kicker">EFTER MATCHEN</span><h3>Kommentarer</h3></div><span>{comments.length}</span></div>
+    {loading?<p className="form-note">Hämtar kommentarer…</p>:comments.length?<div className="comments-list">{comments.map((comment)=>{const edited=new Date(comment.updatedAt).getTime()-new Date(comment.createdAt).getTime()>1000;return <article className="match-comment" key={comment.id}><div className="comment-meta"><strong>{comment.authorName}</strong><time dateTime={comment.updatedAt}>{date(comment.createdAt,{day:"numeric",month:"short",hour:"2-digit",minute:"2-digit"})}{edited?" · redigerad":""}</time></div>{editingId===comment.id?<form className="comment-form" onSubmit={(e)=>{e.preventDefault();void submit("update",comment.id);}}><textarea value={draft} onChange={(e)=>setDraft(e.target.value)} maxLength={2000} rows={4} required autoFocus/><div className="comment-actions"><button className="button subtle" type="button" disabled={saving} onClick={()=>{setEditingId(null);setDraft("");}}>Avbryt</button><button className="button dark" disabled={saving||!draft.trim()}>Spara ändring</button></div></form>:<p className="comment-body">{comment.body}</p>}{comment.canEdit&&editingId!==comment.id&&<div className="comment-actions"><button className="auth-switch" disabled={saving} onClick={()=>{setEditingId(comment.id);setDraft(comment.body);}}>Redigera</button><button className="auth-switch" disabled={saving} onClick={()=>void remove(comment.id)}>Ta bort</button></div>}</article>;})}</div>:<p className="form-note">Inga kommentarer ännu. Skriv den första!</p>}
+    {!signedIn?<div className="comment-login"><span>Logga in för att läsa och skriva kommentarer.</span><button className="button dark" onClick={onLogin}>Logga in <LogIn size={15}/></button></div>:canComment?(editingId===null&&<form className="comment-form new-comment" onSubmit={(e)=>{e.preventDefault();void submit("create");}}><label htmlFor={`match-comment-${matchId}`}>Skriv en kommentar</label><textarea id={`match-comment-${matchId}`} value={draft} onChange={(e)=>setDraft(e.target.value)} maxLength={2000} rows={4} placeholder="Dela tankar om matchen…" required/><div className="comment-actions"><small>{draft.length}/2 000</small><button className="button dark" disabled={saving||!draft.trim()}>Publicera kommentar</button></div></form>):<p className="form-note">Kommentarer är öppna för lagets spelare och administratörer.</p>}
+  </section>;
 }
 
 function AuthModal({
@@ -2058,7 +2119,7 @@ function PlayerEditorModal({player,busy,onClose,onSave,onPhoto}:{player:TeamData
 
 function FriendlyMatchEditorModal({match,busy,onClose,onSave}:{match:Match|null;busy:boolean;onClose:()=>void;onSave:(d:Record<string,unknown>)=>Promise<boolean>}) {
   const localValue=match?new Date(new Date(match.startsAt).getTime()-new Date(match.startsAt).getTimezoneOffset()*60000).toISOString().slice(0,16):"";
-  return <Modal title={match?"Redigera träningsmatch":"Lägg till träningsmatch"} onClose={onClose}><p className="form-note">Lägg in matchen efter att den spelats. Träningsmatcher och resultat visas separat från den officiella serien.</p><form className="auth-form" onSubmit={async(e)=>{e.preventDefault();const f=new FormData(e.currentTarget);const ok=await onSave({type:"friendlyMatch",...(match?{matchId:match.id}:{}),opponent:f.get("opponent"),startsAt:new Date(String(f.get("startsAt"))).toISOString(),homeScore:f.get("homeScore")===""?null:Number(f.get("homeScore")),awayScore:f.get("awayScore")===""?null:Number(f.get("awayScore"))});if(ok)onClose();}}><label>Motståndare<input name="opponent" defaultValue={match?.away??""} maxLength={100} required/></label><label>Datum och tid<input name="startsAt" type="datetime-local" defaultValue={localValue} required/></label><div className="form-columns"><label>Inkastarna<input name="homeScore" type="number" min="0" max="100" defaultValue={match?.homeScore??""} placeholder="Mål"/></label><label>{match?.away??"Motståndare"}<input name="awayScore" type="number" min="0" max="100" defaultValue={match?.awayScore??""} placeholder="Mål"/></label></div><button className="button dark full" disabled={busy}>Spara träningsmatch <Check size={16}/></button></form></Modal>;
+  return <Modal title={match?"Redigera träningsmatch":"Lägg till träningsmatch"} onClose={onClose}><p className="form-note">Lägg in matchen efter att den spelats. Välj om spelarnas mål, assist och matcher ska räknas med i skytteligan.</p><form className="auth-form" onSubmit={async(e)=>{e.preventDefault();const f=new FormData(e.currentTarget);const ok=await onSave({type:"friendlyMatch",...(match?{matchId:match.id}:{}),opponent:f.get("opponent"),startsAt:new Date(String(f.get("startsAt"))).toISOString(),homeScore:f.get("homeScore")===""?null:Number(f.get("homeScore")),awayScore:f.get("awayScore")===""?null:Number(f.get("awayScore")),includeInStats:f.get("includeInStats")==="on"});if(ok)onClose();}}><label>Motståndare<input name="opponent" defaultValue={match?.away??""} maxLength={100} required/></label><label>Datum och tid<input name="startsAt" type="datetime-local" defaultValue={localValue} required/></label><div className="form-columns"><label>Inkastarna<input name="homeScore" type="number" min="0" max="100" defaultValue={match?.homeScore??""} placeholder="Mål"/></label><label>{match?.away??"Motståndare"}<input name="awayScore" type="number" min="0" max="100" defaultValue={match?.awayScore??""} placeholder="Mål"/></label></div><label className="checkbox-label"><input type="checkbox" name="includeInStats" defaultChecked={match?.includeInStats ?? true}/>Räkna med i skytteligan</label><button className="button dark full" disabled={busy}>Spara träningsmatch <Check size={16}/></button></form></Modal>;
 }
 
 function MatchPresence({match,team,save,busy}:{match:Match;team:TeamData;save:(d:Record<string,unknown>)=>Promise<boolean>;busy:boolean}) {
@@ -2092,12 +2153,14 @@ function MatchStats({
   save: (d: Record<string, unknown>) => Promise<boolean>;
   busy: boolean;
 }) {
+  const [playerId, setPlayerId] = useState(team.players[0]?.id ?? "");
+  const existing = team.playerMatchStats.find((s) => s.matchId === match.id && s.playerId === playerId);
+  const presence = team.matchPresence.find((p) => p.matchId === match.id && p.playerId === playerId);
   return (
     <details className="admin-stats">
       <summary>Registrera spelarstatistik</summary>
       <p>
-        Välj en spelare. Uppgifterna ersätter tidigare registrering för samma
-        spelare och match.
+        Lägg in mål och assist per spelare. Du kan registrera statistiken innan Korpen har lagt in resultatet. Träningsmatcher räknas bara med om de är markerade för statistiken.
       </p>
       <form
         className="auth-form"
@@ -2116,7 +2179,7 @@ function MatchStats({
       >
         <label>
           Spelare
-          <select name="playerId">
+          <select name="playerId" value={playerId} onChange={(e) => setPlayerId(e.target.value)}>
             {team.players.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
@@ -2130,7 +2193,8 @@ function MatchStats({
             <input
               name="goals"
               type="number"
-              defaultValue={0}
+              key={`goals-${playerId}-${existing?.goals ?? 0}`}
+              defaultValue={existing?.goals ?? 0}
               min={0}
               max={100}
               required
@@ -2141,7 +2205,8 @@ function MatchStats({
             <input
               name="assists"
               type="number"
-              defaultValue={0}
+              key={`assists-${playerId}-${existing?.assists ?? 0}`}
+              defaultValue={existing?.assists ?? 0}
               min={0}
               max={100}
               required
@@ -2149,7 +2214,7 @@ function MatchStats({
           </label>
         </div>
         <label className="checkbox-label">
-          <input type="checkbox" name="played" defaultChecked />
+          <input type="checkbox" name="played" defaultChecked={existing?.played ?? (presence ? presence.status === "played" : true)} />
           Deltog i matchen
         </label>
         <button className="button dark" disabled={busy}>

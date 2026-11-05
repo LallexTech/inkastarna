@@ -14,7 +14,7 @@ const teamAdmin = z.object({ type: z.literal("teamAdmin"), playerId: z.string().
 const rosterPlayer = z.object({ type: z.literal("rosterPlayer"), playerId: z.string().optional(), name: z.string().trim().min(1).max(80), number: z.number().int().min(1).max(99).nullable(), position: positions });
 const stats = z.object({ type: z.literal("stats"), matchId: z.number().int().positive(), playerId: z.string(), goals: z.number().int().min(0).max(100), assists: z.number().int().min(0).max(100), played: z.boolean() });
 const presence = z.object({ type: z.literal("presence"), matchId: z.number().int().positive(), players: z.array(z.object({ playerId: z.string().min(1), status: z.enum(["played", "spectator", "absent"]) })).max(100) });
-const friendlyMatch = z.object({ type: z.literal("friendlyMatch"), matchId: z.number().int().positive().optional(), opponent: z.string().trim().min(1).max(100), startsAt: z.string().datetime(), homeScore:z.number().int().min(0).max(100).nullable().optional(), awayScore:z.number().int().min(0).max(100).nullable().optional() });
+const friendlyMatch = z.object({ type: z.literal("friendlyMatch"), matchId: z.number().int().positive().optional(), opponent: z.string().trim().min(1).max(100), startsAt: z.string().datetime(), homeScore:z.number().int().min(0).max(100).nullable().optional(), awayScore:z.number().int().min(0).max(100).nullable().optional(), includeInStats:z.boolean().default(false) });
 const deleteFriendlyMatch = z.object({type:z.literal("deleteFriendlyMatch"),matchId:z.number().int().positive()});
 const schema = z.discriminatedUnion("type", [attendance, profile, lineup, teamLeader, teamAdmin, rosterPlayer, stats, presence, friendlyMatch, deleteFriendlyMatch]);
 
@@ -24,12 +24,12 @@ export async function GET(request: Request) {
   const snapshot=await db.query("SELECT data FROM league_snapshot WHERE id=1");
   const league=snapshot.rows[0]?.data as League|undefined;
   const [players, responses, lineups, teamLeads, teamAdmins, friendlies, presences, ballots, ratings, motms, currentPlayer, playerMatchStats] = await Promise.all([
-    db.query(`SELECT r.id, r.display_name AS name, r.user_id IS NOT NULL AS "hasAccount", r.user_id, u.email, rp.number, COALESCE(rp.position,p.position,'Allround') AS position, (rp.photo IS NOT NULL) AS "hasPhoto", COALESCE(s.goals,0)::int AS goals, COALESCE(s.assists,0)::int AS assists, COALESCE(s.appearances,0)::int AS appearances, (ta.user_id IS NOT NULL) AS admin FROM roster r LEFT JOIN "user" u ON u.id=r.user_id LEFT JOIN roster_profile rp ON rp.player_id=r.id LEFT JOIN player_profile p ON p.user_id=r.user_id LEFT JOIN team_admin ta ON ta.user_id=r.user_id LEFT JOIN (SELECT player_id,SUM(goals) goals,SUM(assists) assists,COUNT(*) FILTER(WHERE played) appearances FROM player_stats GROUP BY player_id) s ON s.player_id=r.id ORDER BY r.display_name`),
+    db.query(`SELECT r.id, r.display_name AS name, r.user_id IS NOT NULL AS "hasAccount", r.user_id, u.email, rp.number, COALESCE(rp.position,p.position,'Allround') AS position, (rp.photo IS NOT NULL) AS "hasPhoto", COALESCE(s.goals,0)::int AS goals, COALESCE(s.assists,0)::int AS assists, COALESCE(s.appearances,0)::int AS appearances, (ta.user_id IS NOT NULL) AS admin FROM roster r LEFT JOIN "user" u ON u.id=r.user_id LEFT JOIN roster_profile rp ON rp.player_id=r.id LEFT JOIN player_profile p ON p.user_id=r.user_id LEFT JOIN team_admin ta ON ta.user_id=r.user_id LEFT JOIN (SELECT ps.player_id,SUM(ps.goals)::int goals,SUM(ps.assists)::int assists,COUNT(*) FILTER(WHERE ps.played)::int appearances FROM player_stats ps LEFT JOIN friendly_match fm ON fm.id=ps.match_id WHERE fm.id IS NULL OR fm.include_in_stats GROUP BY ps.player_id) s ON s.player_id=r.id ORDER BY r.display_name`),
     db.query('SELECT a.match_id AS "matchId", a.user_id AS "userId", u.name, a.status FROM attendance a JOIN "user" u ON u.id=a.user_id'),
     db.query('SELECT match_id AS "matchId", slots, formation FROM lineup'),
     db.query("SELECT r.id FROM team_leader tl JOIN roster r ON r.user_id=tl.user_id"),
     db.query("SELECT r.id FROM team_admin ta JOIN roster r ON r.user_id=ta.user_id"),
-    db.query("SELECT id,opponent,starts_at AS \"startsAt\",home_score AS \"homeScore\",away_score AS \"awayScore\" FROM friendly_match ORDER BY starts_at DESC"),
+    db.query("SELECT id,opponent,starts_at AS \"startsAt\",home_score AS \"homeScore\",away_score AS \"awayScore\",include_in_stats AS \"includeInStats\" FROM friendly_match ORDER BY starts_at DESC"),
     db.query('SELECT match_id AS "matchId",player_id AS "playerId",status FROM match_presence'),
     db.query('SELECT match_id AS "matchId",closed_at IS NULL AS open,closed_at IS NOT NULL AS closed FROM match_ballot'),
     db.query(`SELECT mr.match_id AS "matchId",mr.player_id AS "playerId",AVG(mr.stars)::float AS average,COUNT(*)::int AS count FROM match_rating mr JOIN match_presence target ON target.match_id=mr.match_id AND target.player_id=mr.player_id AND target.status='played' JOIN match_vote v ON v.match_id=mr.match_id AND v.voter_user_id=mr.voter_user_id JOIN match_ballot b ON b.match_id=mr.match_id AND b.closed_at IS NOT NULL JOIN roster voter ON voter.user_id=v.voter_user_id JOIN match_presence vp ON vp.match_id=v.match_id AND vp.player_id=voter.id AND vp.status IN ('played','spectator') GROUP BY mr.match_id,mr.player_id`),
@@ -56,7 +56,7 @@ export async function GET(request: Request) {
     const winner=rows.find((x)=>x.winnerId);
     if (winner) { const v=seasonRatings.get(winner.playerId) ?? {total:0,count:0,matches:new Set<number>(),motm:0}; v.motm++; seasonRatings.set(winner.playerId,v); }
   }
-  const friendlyMatches = friendlies.rows.map((m) => ({ id:m.id, startsAt:new Date(m.startsAt).toISOString(), location:"Träningsmatch", finished:true, home:"Inkastarna", away:m.opponent, homeId:27757, awayId:0, homeScore:m.homeScore===null?null:Number(m.homeScore), awayScore:m.awayScore===null?null:Number(m.awayScore), friendly:true }));
+  const friendlyMatches = friendlies.rows.map((m) => ({ id:m.id, startsAt:new Date(m.startsAt).toISOString(), location:"Träningsmatch", finished:true, home:"Inkastarna", away:m.opponent, homeId:27757, awayId:0, homeScore:m.homeScore===null?null:Number(m.homeScore), awayScore:m.awayScore===null?null:Number(m.awayScore), friendly:true, includeInStats:Boolean(m.includeInStats) }));
   return Response.json({
     players: players.rows.map(({ user_id, email, hasPhoto, ...p }) => ({ ...p, rootAdmin:isAdmin(email ?? ""), admin:Boolean(p.admin || isAdmin(email ?? "")), photoUrl:hasPhoto ? `/api/player-photo?id=${encodeURIComponent(p.id)}` : null })),
     attendance:responses.rows, lineups:lineups.rows, teamLeads:teamLeads.rows.map((r)=>r.id), teamAdmins:teamAdmins.rows.map((r)=>r.id), admin, leader,
@@ -112,9 +112,9 @@ export async function POST(request: Request) {
     if (new Date(data.startsAt).getTime()>Date.now()) return Response.json({error:"Registrera träningsmatchen efter att den är färdigspelad."},{status:400});
     if (((data.homeScore??null)===null) !== ((data.awayScore??null)===null)) return Response.json({error:"Fyll i målen för båda lagen, eller lämna båda tomma."},{status:400});
     if (data.matchId) {
-      const updated=await db.query("UPDATE friendly_match SET opponent=$2,starts_at=$3,home_score=$4,away_score=$5 WHERE id=$1",[data.matchId,data.opponent,new Date(data.startsAt),data.homeScore??null,data.awayScore??null]);
+      const updated=await db.query("UPDATE friendly_match SET opponent=$2,starts_at=$3,home_score=$4,away_score=$5,include_in_stats=$6 WHERE id=$1",[data.matchId,data.opponent,new Date(data.startsAt),data.homeScore??null,data.awayScore??null,data.includeInStats]);
       if (!updated.rowCount) return Response.json({error:"Träningsmatchen finns inte."},{status:404});
-    } else await db.query("INSERT INTO friendly_match(opponent,starts_at,created_by,home_score,away_score) VALUES($1,$2,$3,$4,$5)",[data.opponent,new Date(data.startsAt),session.user.id,data.homeScore??null,data.awayScore??null]);
+    } else await db.query("INSERT INTO friendly_match(opponent,starts_at,created_by,home_score,away_score,include_in_stats) VALUES($1,$2,$3,$4,$5,$6)",[data.opponent,new Date(data.startsAt),session.user.id,data.homeScore??null,data.awayScore??null,data.includeInStats]);
   } else if (data.type === "deleteFriendlyMatch") {
     if (!leader) return Response.json({error:"Bara lagledare kan ta bort träningsmatcher."},{status:403});
     const client=await db.connect();
@@ -125,6 +125,7 @@ export async function POST(request: Request) {
       await client.query("DELETE FROM match_ballot WHERE match_id=$1",[data.matchId]);
       await client.query("DELETE FROM match_presence WHERE match_id=$1",[data.matchId]);
       await client.query("DELETE FROM player_stats WHERE match_id=$1",[data.matchId]);
+      await client.query("DELETE FROM match_comment WHERE match_id=$1",[data.matchId]);
       await client.query("DELETE FROM lineup WHERE match_id=$1",[data.matchId]);
       await client.query("DELETE FROM attendance WHERE match_id=$1",[data.matchId]);
       await client.query("DELETE FROM friendly_match WHERE id=$1",[data.matchId]);
@@ -133,9 +134,9 @@ export async function POST(request: Request) {
   } else if (data.type === "presence") {
     if (!leader) return Response.json({error:"Bara lagledare kan ändra närvaro."},{status:403});
     const {league}=await readLeague();
-    const official=league?.matches.find((m)=>m.id===data.matchId && m.finished && (m.homeId===league.teamId || m.awayId===league.teamId));
+    const official=league?.matches.find((m)=>m.id===data.matchId && (m.homeId===league.teamId || m.awayId===league.teamId) && (m.finished || new Date(m.startsAt).getTime()<=Date.now()));
     const friendly=await db.query("SELECT id FROM friendly_match WHERE id=$1",[data.matchId]);
-    if (!official && !friendly.rowCount) return Response.json({error:"Matchen finns inte eller är inte färdigspelad."},{status:404});
+    if (!official && !friendly.rowCount) return Response.json({error:"Matchen finns inte eller har inte spelats än."},{status:404});
     const ids=data.players.map((p)=>p.playerId);
     if (new Set(ids).size !== ids.length) return Response.json({error:"En spelare kan bara ha en närvaroroll."},{status:400});
     if (ids.length) {
@@ -151,8 +152,9 @@ export async function POST(request: Request) {
     if (!leader) return Response.json({error:"Bara lagledare kan registrera statistik."},{status:403});
     const {league}=await readLeague();
     const match=league?.matches.find((m)=>m.id===data.matchId && (m.homeId===league.teamId || m.awayId===league.teamId));
-    if (!match) return Response.json({error:"Matchen finns inte i lagets spelschema."},{status:404});
-    if (!match.finished) return Response.json({error:"Matchen måste vara färdigspelad hos Korpen."},{status:409});
+    const friendly=await db.query("SELECT id FROM friendly_match WHERE id=$1",[data.matchId]);
+    if (!match && !friendly.rowCount) return Response.json({error:"Matchen finns inte i lagets spelschema."},{status:404});
+    if (match && !match.finished && new Date(match.startsAt).getTime()>Date.now()) return Response.json({error:"Matchen kan inte registreras före avspark."},{status:409});
     const player=await db.query("SELECT id FROM roster WHERE id=$1",[data.playerId]);
     if (!player.rowCount) return Response.json({error:"Okänd spelare."},{status:404});
     if (!data.played && (data.goals || data.assists)) return Response.json({error:"Mål och assist kräver att spelaren deltagit."},{status:400});
