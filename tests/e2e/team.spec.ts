@@ -8,7 +8,9 @@ const sql = new Pool({ connectionString: process.env.DATABASE_URL, max: 2 });
 const testPlayers = [
   { id: "qa-admin", name: "QA Admin", email: "qa-admin@inkastarna.invalid" },
   { id: "qa-player", name: "QA Player", email: "qa-player@inkastarna.invalid" },
+  { id: "qa-spectator", name: "QA Spectator", email: "qa-spectator@inkastarna.invalid" },
 ];
+const friendlyIds:number[]=[];
 
 test.beforeAll(async () => {
   if (process.env.CI) {
@@ -35,11 +37,17 @@ test.beforeAll(async () => {
   }
   for (const p of testPlayers)
     await sql.query(
-      "INSERT INTO roster(id,name) VALUES($1,$2) ON CONFLICT DO NOTHING",
+      "INSERT INTO roster(id,name,display_name) VALUES($1,$2,$2) ON CONFLICT DO NOTHING",
       [p.id, p.name],
     );
 });
 test.afterAll(async () => {
+  if (friendlyIds.length) {
+    await sql.query("DELETE FROM match_vote WHERE match_id=ANY($1::int[])",[friendlyIds]);
+    await sql.query("DELETE FROM match_presence WHERE match_id=ANY($1::int[])",[friendlyIds]);
+    await sql.query("DELETE FROM match_ballot WHERE match_id=ANY($1::int[])",[friendlyIds]);
+    await sql.query("DELETE FROM friendly_match WHERE id=ANY($1::int[])",[friendlyIds]);
+  }
   // Only delete exact accounts and rows owned by this named QA fixture.
   await sql.query(
     'DELETE FROM lineup WHERE updated_by IN (SELECT id FROM "user" WHERE email=ANY($1::text[]))',
@@ -51,6 +59,7 @@ test.afterAll(async () => {
   await sql.query("DELETE FROM roster WHERE id=ANY($1::text[])", [
     testPlayers.map((p) => p.id),
   ]);
+  await sql.query("DELETE FROM roster WHERE lower(name)=lower($1)",["QA Added Player"]);
   await sql.end();
 });
 
@@ -211,7 +220,8 @@ test("team-code access, session, RSVP persistence and admin lineup", async ({
   });
   expect(promoted.status(), await promoted.text()).toBe(200);
   const promotedData = await (await page.request.get("/api/team")).json();
-  expect(promotedData.admin).toBe(true);
+  expect(promotedData.admin).toBe(false);
+  expect(promotedData.leader).toBe(true);
   const leaderLineup = await page.request.post("/api/team", {
     data: { ...lineupData, formation: "1-2-1" },
     headers: { origin: "http://localhost:3100" },
@@ -224,5 +234,68 @@ test("team-code access, session, RSVP persistence and admin lineup", async ({
   expect(demoted.status()).toBe(200);
   const demotedData = await (await page.request.get("/api/team")).json();
   expect(demotedData.admin).toBe(false);
+  expect(demotedData.leader).toBe(false);
   await admin.dispose();
+});
+
+test("player administration, profile photos, friendly matches and Man of the Match voting", async ({playwright})=>{
+  const admin=await playwright.request.newContext({baseURL:"http://localhost:3100"});
+  const player=await playwright.request.newContext({baseURL:"http://localhost:3100"});
+  const spectator=await playwright.request.newContext({baseURL:"http://localhost:3100"});
+  const signin=async(ctx:typeof admin,p:{email:string})=>ctx.post("/api/auth/sign-in/email",{data:{email:p.email,password},headers:{origin:"http://localhost:3100"}});
+  expect((await signin(admin,testPlayers[0])).status()).toBe(200);
+  expect((await signin(player,testPlayers[1])).status()).toBe(200);
+  expect((await signin(spectator,testPlayers[2])).status()).toBe(200);
+  const headers={origin:"http://localhost:3100"};
+  const added=await admin.post("/api/team",{headers,data:{type:"rosterPlayer",name:"QA Added Player",number:9,position:"Back"}});
+  expect(added.status(),await added.text()).toBe(200);
+  let team=await (await admin.get("/api/team")).json();
+  expect(team.players.some((p:{name:string})=>p.name==="QA Added Player")).toBe(true);
+  const renamed=await admin.post("/api/team",{headers,data:{type:"rosterPlayer",playerId:"qa-player",name:"QA Player Updated",number:12,position:"Anfallare"}});
+  expect(renamed.status()).toBe(200);
+  team=await (await admin.get("/api/team")).json();
+  expect(team.players.find((p:{id:string})=>p.id==="qa-player").name).toBe("QA Player Updated");
+  await admin.post("/api/team",{headers,data:{type:"rosterPlayer",playerId:"qa-player",name:"QA Player",number:null,position:"Allround"}});
+  const promoted=await admin.post("/api/team",{headers,data:{type:"teamAdmin",playerId:"qa-player",enabled:true}});
+  expect(promoted.status()).toBe(200);
+  team=await (await admin.get("/api/team")).json();
+  expect(team.players.find((p:{id:string})=>p.id==="qa-player").admin).toBe(true);
+  expect((await admin.post("/api/team",{headers,data:{type:"teamAdmin",playerId:"qa-player",enabled:false}})).status()).toBe(200);
+  expect((await admin.post("/api/team",{headers,data:{type:"teamAdmin",playerId:"qa-admin",enabled:false}})).status()).toBe(409);
+  const png=Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j0y8AAAAASUVORK5CYII=","base64");
+  const photo=await admin.post("/api/player-photo",{headers,multipart:{playerId:"qa-player",photo:{name:"avatar.png",mimeType:"image/png",buffer:png}}});
+  expect(photo.status(),await photo.text()).toBe(200);
+  expect((await admin.get("/api/player-photo?id=qa-player")).status()).toBe(200);
+  expect((await admin.post("/api/player-photo",{headers,multipart:{playerId:"qa-player",remove:"1"}})).status()).toBe(200);
+  const makeMatch=async(opponent:string)=>{
+    const response=await admin.post("/api/team",{headers,data:{type:"friendlyMatch",opponent,startsAt:new Date(Date.now()-86400000).toISOString()}});
+    expect(response.status(),await response.text()).toBe(200);
+    const current=await (await admin.get("/api/team")).json();
+    const found=current.friendlyMatches.find((m:{away:string})=>m.away===opponent);
+    friendlyIds.push(found.id); return found.id as number;
+  };
+  const matchId=await makeMatch("QA Friendly");
+  const secondMatch=await makeMatch("QA Friendly 2");
+  expect((await admin.post("/api/match-votes",{headers,data:{type:"open",matchId:secondMatch}})).status()).toBe(409);
+  const marked=await admin.post("/api/team",{headers,data:{type:"presence",matchId,players:[{playerId:"qa-admin",status:"played"},{playerId:"qa-player",status:"played"},{playerId:"qa-spectator",status:"spectator"}]}});
+  expect(marked.status()).toBe(200);
+  expect((await admin.post("/api/match-votes",{headers,data:{type:"open",matchId}})).status()).toBe(200);
+  expect((await player.post("/api/match-votes",{headers,data:{type:"vote",matchId,motmPlayerId:"qa-admin",ratings:[{playerId:"qa-player",stars:5}]}})).status()).toBe(400);
+  expect((await player.post("/api/match-votes",{headers,data:{type:"vote",matchId,motmPlayerId:"qa-admin",ratings:[{playerId:"qa-spectator",stars:5}]}})).status()).toBe(400);
+  expect((await player.post("/api/match-votes",{headers,data:{type:"vote",matchId,motmPlayerId:"qa-admin",ratings:[{playerId:"qa-admin",stars:4}]}})).status()).toBe(200);
+  expect((await spectator.post("/api/match-votes",{headers,data:{type:"vote",matchId,motmPlayerId:"qa-player",ratings:[{playerId:"qa-player",stars:5}]}})).status()).toBe(200);
+  expect((await admin.post("/api/match-votes",{headers,data:{type:"close",matchId}})).status()).toBe(200);
+  const votes=await (await admin.get(`/api/match-votes?matchId=${matchId}`)).json();
+  expect(votes.closed).toBe(true);
+  expect(votes.ratings.find((r:{playerId:string})=>r.playerId==="qa-admin")).toMatchObject({average:4,count:1});
+  expect(votes.ratings.find((r:{playerId:string})=>r.playerId==="qa-player")).toMatchObject({average:5,count:1});
+  expect(votes.motm.every((r:{count:number})=>r.count===1)).toBe(true);
+  expect((await player.post("/api/match-votes",{headers,data:{type:"vote",matchId,motmPlayerId:"qa-admin",ratings:[{playerId:"qa-admin",stars:1}]}})).status()).toBe(409);
+  const corrected=await admin.post("/api/team",{headers,data:{type:"presence",matchId,players:[{playerId:"qa-admin",status:"played"},{playerId:"qa-player",status:"absent"},{playerId:"qa-spectator",status:"spectator"}]}});
+  expect(corrected.status()).toBe(200);
+  const afterCorrection=await (await admin.get(`/api/match-votes?matchId=${matchId}`)).json();
+  expect(afterCorrection.ratings.some((r:{playerId:string})=>r.playerId==="qa-admin")).toBe(false);
+  const stats=await (await admin.get("/api/team")).json();
+  expect(stats.seasonRatings.every((r:{motm:number;matches:number})=>r.motm===0&&r.matches===0)).toBe(true);
+  await Promise.all([admin.dispose(),player.dispose(),spectator.dispose()]);
 });

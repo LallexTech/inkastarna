@@ -9,6 +9,7 @@ export type Match = {
   awayId: number;
   homeScore: number | null;
   awayScore: number | null;
+  friendly?: boolean;
 };
 export type Standing = {
   position: number;
@@ -42,6 +43,9 @@ export type Player = {
   goals: number;
   assists: number;
   appearances: number;
+  photoUrl?: string | null;
+  admin?: boolean;
+  rootAdmin?: boolean;
 };
 export type Attendance = {
   matchId: number;
@@ -57,7 +61,15 @@ export type TeamData = {
   attendance: Attendance[];
   lineups: Lineup[];
   teamLeads: string[];
+  teamAdmins: string[];
   admin: boolean;
+  leader: boolean;
   userId: string;
   playerId: string | null;
+  friendlyMatches: Match[];
+  matchPresence: { matchId: number; playerId: string; status: "played" | "spectator" | "absent" }[];
+  ballots: { matchId: number; open: boolean; closed: boolean }[];
+  ratings: { matchId: number; playerId: string; average: number | null; count: number; motm: number; winner: boolean }[];
+  seasonRatings: { playerId: string; average: number | null; matches: number; motm: number }[];
+  playerMatchStats: { matchId: number; playerId: string; goals: number; assists: number; played: boolean }[];
 };
