@@ -38,6 +38,7 @@ export type Player = {
   name: string;
   number: number | null;
   position: string;
+  hasAccount?: boolean;
   goals: number;
   assists: number;
   appearances: number;
@@ -48,12 +49,14 @@ export type Attendance = {
   name: string;
   status: "yes" | "maybe" | "no";
 };
-export type Lineup = { matchId: number; slots: (string | null)[] };
+export type Formation = "1-2-1" | "2-2";
+export type Lineup = { matchId: number; slots: (string | null)[]; formation: Formation };
 export type TeamData = {
   inviteCode?: string;
   players: Player[];
   attendance: Attendance[];
   lineups: Lineup[];
+  teamLeads: string[];
   admin: boolean;
   userId: string;
   playerId: string | null;

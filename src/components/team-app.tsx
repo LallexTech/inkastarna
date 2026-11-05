@@ -34,7 +34,7 @@ import {
 } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { calendarEvent } from "@/lib/calendar";
-import type { League, Match, Standing, TeamData } from "@/lib/types";
+import type { Formation, League, Match, Standing, TeamData } from "@/lib/types";
 
 type Tab =
   | "overview"
@@ -189,7 +189,9 @@ export default function TeamApp() {
     [busy, setBusy] = useState(false);
   const [lineupMatch, setLineupMatch] = useState<number>(0),
     [slots, setSlots] = useState<(string | null)[]>(Array(5).fill(null)),
+    [formation, setFormation] = useState<Formation>("1-2-1"),
     [lineupDirty, setLineupDirty] = useState(false);
+  const [installPlatform, setInstallPlatform] = useState<"ios" | "android" | "desktop">("desktop");
   const [deferredInstall, setDeferredInstall] = useState<
     | (Event & {
         prompt: () => Promise<void>;
@@ -264,6 +266,14 @@ export default function TeamApp() {
       window.matchMedia("(display-mode: standalone)").matches ||
       (navigator as Navigator & { standalone?: boolean }).standalone === true;
     setInstalled(isStandalone);
+    const ua = navigator.userAgent;
+    setInstallPlatform(
+      /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+        ? "ios"
+        : /Android/i.test(ua)
+          ? "android"
+          : "desktop",
+    );
     if (!isStandalone) {
       let dismissed = false;
       try {
@@ -325,6 +335,10 @@ export default function TeamApp() {
     setSlots(
       team?.lineups.find((l) => l.matchId === currentMatch.id)?.slots ??
         Array(5).fill(null),
+    );
+    setFormation(
+      team?.lineups.find((l) => l.matchId === currentMatch.id)?.formation ??
+        "1-2-1",
     );
     setLineupDirty(false);
   }, [currentMatch?.id, team]);
@@ -1106,14 +1120,14 @@ export default function TeamApp() {
                           icon={Target}
                           title="Första målet väntar på sin målskytt."
                         >
-                          Lagledaren registrerar mål, assist och deltagande
-                          efter färdigspelade matcher. Inga mål är registrerade
-                          än.
+                          Öppna en match under Spelade matcher och välj
+                          Registrera spelarstatistik för att lägga in mål,
+                          assist och deltagande. Inga mål är registrerade än.
                         </Empty>
                       )}
                       <div className="panel-foot">
-                        Intern spelarstatistik registreras av lagledaren.
-                        Matchresultat hämtas från Korpen.
+                        Matchstatistik registreras från detaljvyn för en spelad
+                        match. Resultat hämtas från Korpen.
                       </div>
                     </section>
                   )}
@@ -1160,6 +1174,47 @@ export default function TeamApp() {
                           </article>
                         ))}
                       </div>
+                      {team?.admin && (
+                        <section className="panel leaders-panel">
+                          <div className="panel-heading">
+                            <div>
+                              <span className="section-kicker">LAGANSVAR</span>
+                              <h2>Lagledare</h2>
+                            </div>
+                            <Shield size={21} />
+                          </div>
+                          <p className="panel-foot">
+                            Välj vilka konton i truppen som får hantera laguppställning,
+                            matchstatistik och lagledare.
+                          </p>
+                          <div className="leader-list">
+                            {(team?.players ?? []).map((p) => {
+                              const isLeader = team?.teamLeads.includes(p.id) ?? false;
+                              return (
+                                <div key={p.id}>
+                                  <span>
+                                    {p.name}
+                                    {!p.hasAccount && <small> · behöver skapa konto</small>}
+                                  </span>
+                                  <button
+                                    className={`button ${isLeader ? "subtle" : "dark"}`}
+                                    disabled={busy || !p.hasAccount}
+                                    onClick={() =>
+                                      void save({
+                                        type: "teamLeader",
+                                        playerId: p.id,
+                                        enabled: !isLeader,
+                                      })
+                                    }
+                                  >
+                                    {isLeader ? "Ta bort lagledare" : "Gör till lagledare"}
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </section>
+                      )}
                     </>
                   ) : (
                     authGate()
@@ -1176,7 +1231,7 @@ export default function TeamApp() {
                         <div className="panel-heading">
                           <div>
                             <span className="section-kicker">
-                              FIVE-A-SIDE · 1–2–1
+                              FEMMANNALAG · {formation}
                             </span>
                             <h2>Vårt lag på planen</h2>
                           </div>
@@ -1199,19 +1254,32 @@ export default function TeamApp() {
                                   </option>
                                 ))}
                               </select>
+                              {team?.admin && (
+                                <>
+                                  <label htmlFor="lineup-formation">Formation</label>
+                                  <select
+                                    id="lineup-formation"
+                                    value={formation}
+                                    onChange={(e) => {
+                                      setFormation(e.target.value as Formation);
+                                      setLineupDirty(true);
+                                    }}
+                                  >
+                                    <option value="1-2-1">1–2–1</option>
+                                    <option value="2-2">2–2</option>
+                                  </select>
+                                </>
+                              )}
                             </div>
-                            <div className="formation">
+                            <div className={`formation ${formation === "2-2" ? "two-two" : ""}`}>
                               <div className="field-lines">
                                 <div />
                                 <i />
                               </div>
-                              {[
-                                "Anfallare",
-                                "Vänster",
-                                "Höger",
-                                "Back",
-                                "Målvakt",
-                              ].map((label, i) => (
+                              {(formation === "2-2"
+                                ? ["Anfallare vänster", "Anfallare höger", "Back vänster", "Back höger", "Målvakt"]
+                                : ["Anfallare", "Vänster", "Höger", "Back", "Målvakt"]
+                              ).map((label, i) => (
                                 <div
                                   className={`formation-player slot-${i}`}
                                   key={label}
@@ -1277,6 +1345,7 @@ export default function TeamApp() {
                                       type: "lineup",
                                       matchId: currentMatch.id,
                                       slots,
+                                      formation,
                                     })
                                   }
                                 >
@@ -1392,28 +1461,34 @@ export default function TeamApp() {
               Installera Inkastarna <ArrowDownToLine size={18} />
             </button>
           )}
-          <div className="install-step">
-            <strong>Dator · Chrome eller Edge</strong>
-            <p>
-              Klicka på installationsikonen i adressfältet. Du kan också öppna
-              webbläsarens meny och välja <b>Installera sidan som app</b>.
-            </p>
-          </div>
-          <div className="install-step">
-            <strong>iPhone · Safari</strong>
-            <p>
-              Öppna sidan i Safari. Tryck på Dela <ArrowUpRight size={13} /> och
-              välj <b>Lägg till på hemskärmen</b>. Öppna sedan Inkastarna via
-              ikonen.
-            </p>
-          </div>
-          <div className="install-step">
-            <strong>Android · Chrome</strong>
-            <p>
-              Öppna menyn ⋮ och välj <b>Installera app</b> eller{" "}
-              <b>Lägg till på startskärmen</b>.
-            </p>
-          </div>
+          {installPlatform === "ios" ? (
+            <div className="install-step">
+              <strong>iPhone eller iPad</strong>
+              <p>
+                Öppna sidan i Safari, tryck på <b>Dela</b> och välj{" "}
+                <b>Lägg till på hemskärmen</b>. Tryck på <b>Lägg till</b> och
+                starta sedan Inkastarna från den nya ikonen. iOS kräver de här
+                stegen manuellt.
+              </p>
+            </div>
+          ) : installPlatform === "android" ? (
+            <div className="install-step">
+              <strong>Android</strong>
+              <p>
+                Tryck på installationsknappen ovan och godkänn i Chromes
+                installationsruta. Om den inte visas, öppna menyn ⋮ och välj{" "}
+                <b>Installera app</b>.
+              </p>
+            </div>
+          ) : (
+            <div className="install-step">
+              <strong>Dator · Chrome eller Edge</strong>
+              <p>
+                Tryck på installationsknappen ovan eller välj
+                installationsikonen i adressfältet.
+              </p>
+            </div>
+          )}
           <p className="form-note">
             Du behöver internet för aktuella matcher och kallelsesvar. Vid
             avbrott visar appen en tydlig offlinesida.

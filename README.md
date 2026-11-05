@@ -8,9 +8,9 @@ Lagappen för Inkastarna. Innefotboll, 2 × 15 minuter, Stora Mossen. Next.js, R
 
 ## Funktioner
 
-Översikt, kommande och spelade matcher, statistik, intern skytteliga, officiell tabell, trupp och en sparbar femmannauppställning. Spelarna kan registrera sig med lagkod, logga in, ange tröjnummer/position och svara kommer/kanske/kan inte på kommande matcher. Lagledaren sparar laguppställning och registrerar mål, assist och deltagande för färdigspelade matcher.
+Översikt, kommande och spelade matcher, statistik, intern skytteliga, officiell tabell, trupp och en sparbar femmannauppställning i 1–2–1 eller 2–2. Spelarna kan registrera sig med lagkod, logga in, ange tröjnummer/position och svara kommer/kanske/kan inte på kommande matcher. Lagledaren sparar laguppställning och registrerar mål, assist och deltagande för färdigspelade matcher från matchens detaljvy. I Truppen kan lagledare utse fler lagledare bland spelare som har konto.
 
-PWA med manifest, Android-ikoner, maskbar ikon, Apple-ikon, installationsguide och en offlinesida. Spelaruppgifter och autentiserade API-svar sparas inte i service worker-cachen. Internet krävs för aktuell data och kallelsesvar.
+PWA med manifest, Android-ikoner, maskbar ikon, Apple-ikon, plattformsanpassad installationsguide och en offlinesida. Android kan visa webbläsarens installationsruta; iOS kräver att användaren själv väljer Dela → Lägg till på hemskärmen i Safari. Spelaruppgifter och autentiserade API-svar sparas inte i service worker-cachen. Internet krävs för aktuell data och kallelsesvar.
 
 Kalenderexport (`.ics`) och kopierbar kallelsetext finns per kommande match. Kopiering skickar inget automatiskt till Messenger. Ingen Messenger-bot eller åtkomst till privata Korpen-sidor är ansluten.
 
@@ -22,7 +22,7 @@ Synk sker när appen öppnas och den sparade informationen är äldre än 15 min
 
 Spelare registrerar sitt eget förnamn från den förinlagda truppen. Varje spelarprofil kan kopplas till ett konto. Administratörsadressen sätts via `ADMIN_EMAILS`; administratören behöver en separat privat `ADMIN_JOIN_CODE` vid registreringen. `ADMIN_PLAYER_NAME` reserverar lagledarens spelarprofil. Den vanliga lagkoden ger inte möjlighet att registrera administratörskontot.
 
-E-postverifiering och automatisk lösenordsåterställning är ännu inte anslutna. Ingen e-post skickas av appen. Lagkoden ska bara delas med laget. Konto-, profil- och kallelsedata finns i databasen, aldrig i Git. Förhandsmiljö och produktion har separata databaser och separata hemligheter.
+E-postverifiering och automatisk lösenordsåterställning är ännu inte anslutna. Ingen e-post skickas av appen. Lagkoden ska bara delas med laget. `ADMIN_EMAILS` anger den ursprungliga administratören; lagledare kan sedan tilldela eller ta bort lagledarbehörighet för andra registrerade spelare i Truppen. Minst en databasbaserad lagledare kan inte tas bort av en icke-administratör. Konto-, profil- och kallelsedata finns i databasen, aldrig i Git. Förhandsmiljö och produktion har separata databaser och separata hemligheter.
 
 ## Lokal utveckling
 
