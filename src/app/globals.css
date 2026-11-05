@@ -1857,6 +1857,10 @@ tr.highlight td {
 .rating-results > div { display:grid; grid-template-columns:1fr auto; gap:3px 12px; padding:10px 0; border-bottom:1px solid var(--line); }
 .rating-results small { grid-column:2; color:var(--muted); text-align:right; }
 .rating-stars { display:inline-flex; align-items:center; gap:1px; color:var(--warning-ink); vertical-align:-2px; white-space:nowrap; }
+.rating-star { position:relative; display:inline-grid; line-height:0; }
+.rating-star > svg { grid-area:1 / 1; }
+.rating-star-outline { color:var(--warning-ink); }
+.rating-star-fill { position:absolute; inset:0; color:var(--warning-ink); }
 .motm-winner-row { order:-1; font-weight:700; }
 .motm-result { display:flex; align-items:center; gap:8px; background:var(--accent-wash); color:var(--accent-ink); padding:12px; margin-top:13px; border-radius:6px; }
 .motm-result span { margin-left:auto; font-size:10px; }

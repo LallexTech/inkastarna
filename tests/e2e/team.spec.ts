@@ -298,7 +298,6 @@ test("player administration, profile photos, friendly matches and Man of the Mat
   const fieldsetBox=await page.locator(".vote-form fieldset").first().boundingBox();
   expect(starBox).not.toBeNull(); expect(fieldsetBox).not.toBeNull();
   expect(starBox!.x+starBox!.width).toBeLessThanOrEqual(fieldsetBox!.x+fieldsetBox!.width);
-  await browser.close();
   expect((await player.post("/api/match-votes",{headers,data:{type:"vote",matchId,motmPlayerId:"qa-admin",ratings:[{playerId:"qa-player",stars:5}]}})).status()).toBe(400);
   expect((await player.post("/api/match-votes",{headers,data:{type:"vote",matchId,motmPlayerId:"qa-admin",ratings:[{playerId:"qa-spectator",stars:5}]}})).status()).toBe(400);
   expect((await player.post("/api/match-votes",{headers,data:{type:"vote",matchId,motmPlayerId:"qa-admin",ratings:[{playerId:"qa-admin",stars:4}]}})).status()).toBe(200);
@@ -311,6 +310,11 @@ test("player administration, profile photos, friendly matches and Man of the Mat
   expect(votes.ratings.find((r:{playerId:string})=>r.playerId==="qa-admin")).toMatchObject({average:4});
   expect(votes.ratings.find((r:{playerId:string})=>r.playerId==="qa-player")).toMatchObject({average:3.5});
   expect(votes.ratings.some((r:{count?:number})=>r.count!==undefined)).toBe(false);
+  await page.reload();
+  await page.locator(".match-row").filter({hasText:"QA Voting UI"}).click();
+  const qaPlayerResult=page.locator(".rating-results > div").filter({hasText:"QA Player"});
+  await expect(qaPlayerResult.locator(".rating-star").nth(3)).toHaveAttribute("data-fill","50");
+  await browser.close();
   expect((await player.post("/api/match-votes",{headers,data:{type:"vote",matchId,motmPlayerId:"qa-admin",ratings:[{playerId:"qa-admin",stars:1}]}})).status()).toBe(409);
   expect((await admin.post("/api/match-votes",{headers,data:{type:"open",matchId}})).status()).toBe(200);
   const reopened=await (await spectator.get(`/api/match-votes?matchId=${matchId}`)).json();
