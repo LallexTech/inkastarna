@@ -290,7 +290,7 @@ test("player administration, profile photos, friendly matches and Man of the Mat
   await uiContext.addCookies((await admin.storageState()).cookies);
   const page=await uiContext.newPage();
   await page.goto("/#played");
-  await page.locator(".match-row").filter({hasText:"QA Friendly"}).click();
+  await page.locator(".match-row").filter({has:page.getByText("QA Friendly",{exact:true})}).click();
   const starChoices=page.locator(".star-choices").first();
   await expect(starChoices.locator("label")).toHaveCount(5);
   await expect(page.getByRole("radio",{name:"3 stjärnor till QA Player"})).toBeChecked();
