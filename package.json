@@ -17,21 +17,22 @@
     "sync": "node --env-file-if-exists=.env.local --import tsx scripts/sync.ts"
   },
   "dependencies": {
+    "better-auth": "latest",
+    "lucide-react": "latest",
     "next": "latest",
+    "pg": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "better-auth": "latest",
-    "pg": "latest",
-    "lucide-react": "latest",
     "zod": "latest"
   },
   "devDependencies": {
-    "typescript": "latest",
-    "tsx": "latest",
+    "@netlify/plugin-nextjs": "5.16.6",
+    "@playwright/test": "latest",
     "@types/node": "latest",
+    "@types/pg": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
-    "@types/pg": "latest",
-    "@playwright/test": "latest"
+    "tsx": "latest",
+    "typescript": "latest"
   }
 }

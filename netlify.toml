@@ -14,3 +14,6 @@
 
 # Next.js routes and authenticated responses are handled by Netlify's OpenNext
 # adapter. Do not add SPA rewrites or cache private API responses at the CDN.
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
