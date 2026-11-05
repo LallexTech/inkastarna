@@ -317,7 +317,7 @@ test("player administration, profile photos, friendly matches and Man of the Mat
   expect(afterCorrection.ratings.some((r:{playerId:string})=>r.playerId==="qa-admin")).toBe(false);
   const stats=await (await admin.get("/api/team")).json();
   expect(stats.seasonRatings.find((r:{playerId:string})=>r.playerId==="qa-admin")).toMatchObject({motm:1,matches:0});
-  expect(stats.seasonRatings.find((r:{playerId:string})=>r.playerId==="qa-player")).toMatchObject({motm:0,matches:0});
+  expect(stats.seasonRatings.find((r:{playerId:string})=>r.playerId==="qa-player")).toBeUndefined();
   expect((await admin.post("/api/match-votes",{headers,data:{type:"delete",matchId}})).status()).toBe(200);
   const removedBallot=await (await admin.get(`/api/match-votes?matchId=${matchId}`)).json();
   expect(removedBallot).toMatchObject({open:false,closed:false,winnerId:null});
