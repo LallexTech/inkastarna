@@ -1,6 +1,10 @@
 import type { NextConfig } from "next";
 const config: NextConfig = {
   poweredByHeader: false,
+  env: {
+    INKASTARNA_DEPLOY_PRIME_URL: process.env.DEPLOY_PRIME_URL ?? "",
+    INKASTARNA_DEPLOY_URL: process.env.DEPLOY_URL ?? "",
+  },
   async headers() {
     return [
       {
