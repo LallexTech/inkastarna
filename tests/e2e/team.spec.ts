@@ -267,15 +267,20 @@ test("player administration, profile photos, friendly matches and Man of the Mat
   expect(photo.status(),await photo.text()).toBe(200);
   expect((await admin.get("/api/player-photo?id=qa-player")).status()).toBe(200);
   expect((await admin.post("/api/player-photo",{headers,multipart:{playerId:"qa-player",remove:"1"}})).status()).toBe(200);
-  const makeMatch=async(opponent:string)=>{
-    const response=await admin.post("/api/team",{headers,data:{type:"friendlyMatch",opponent,startsAt:new Date(Date.now()-86400000).toISOString()}});
+  const makeMatch=async(opponent:string,homeScore:number|null=null,awayScore:number|null=null)=>{
+    const response=await admin.post("/api/team",{headers,data:{type:"friendlyMatch",opponent,startsAt:new Date(Date.now()-86400000).toISOString(),homeScore,awayScore}});
     expect(response.status(),await response.text()).toBe(200);
     const current=await (await admin.get("/api/team")).json();
     const found=current.friendlyMatches.find((m:{away:string})=>m.away===opponent);
     friendlyIds.push(found.id); return found.id as number;
   };
-  const matchId=await makeMatch("QA Friendly");
+  const matchId=await makeMatch("QA Friendly",2,1);
   const secondMatch=await makeMatch("QA Friendly 2");
+  let matches=(await (await admin.get("/api/team")).json()).friendlyMatches;
+  expect(matches.find((m:{id:number})=>m.id===matchId)).toMatchObject({homeScore:2,awayScore:1});
+  expect((await admin.post("/api/team",{headers,data:{type:"friendlyMatch",matchId,opponent:"QA Friendly",startsAt:new Date(Date.now()-86400000).toISOString(),homeScore:4,awayScore:3}})).status()).toBe(200);
+  matches=(await (await admin.get("/api/team")).json()).friendlyMatches;
+  expect(matches.find((m:{id:number})=>m.id===matchId)).toMatchObject({homeScore:4,awayScore:3});
   expect((await admin.post("/api/match-votes",{headers,data:{type:"open",matchId:secondMatch}})).status()).toBe(409);
   const marked=await admin.post("/api/team",{headers,data:{type:"presence",matchId,players:[{playerId:"qa-admin",status:"played"},{playerId:"qa-player",status:"played"},{playerId:"qa-spectator",status:"spectator"}]}});
   expect(marked.status()).toBe(200);
@@ -291,6 +296,14 @@ test("player administration, profile photos, friendly matches and Man of the Mat
   expect(votes.ratings.find((r:{playerId:string})=>r.playerId==="qa-player")).toMatchObject({average:5,count:1});
   expect(votes.motm.every((r:{count:number})=>r.count===1)).toBe(true);
   expect((await player.post("/api/match-votes",{headers,data:{type:"vote",matchId,motmPlayerId:"qa-admin",ratings:[{playerId:"qa-admin",stars:1}]}})).status()).toBe(409);
+  expect((await admin.post("/api/match-votes",{headers,data:{type:"open",matchId}})).status()).toBe(200);
+  const reopened=await (await spectator.get(`/api/match-votes?matchId=${matchId}`)).json();
+  expect(reopened).toMatchObject({open:true,closed:false});
+  expect((await spectator.post("/api/match-votes",{headers,data:{type:"vote",matchId,motmPlayerId:"qa-admin",ratings:[{playerId:"qa-player",stars:3}]}})).status()).toBe(200);
+  expect((await admin.post("/api/match-votes",{headers,data:{type:"close",matchId}})).status()).toBe(200);
+  const revised=await (await admin.get(`/api/match-votes?matchId=${matchId}`)).json();
+  expect(revised.ratings.find((r:{playerId:string})=>r.playerId==="qa-player")).toMatchObject({average:3,count:1});
+  expect(revised.motm).toEqual([{playerId:"qa-admin",count:2,closed:true}]);
   const corrected=await admin.post("/api/team",{headers,data:{type:"presence",matchId,players:[{playerId:"qa-admin",status:"played"},{playerId:"qa-player",status:"absent"},{playerId:"qa-spectator",status:"spectator"}]}});
   expect(corrected.status()).toBe(200);
   const afterCorrection=await (await admin.get(`/api/match-votes?matchId=${matchId}`)).json();

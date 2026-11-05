@@ -51,8 +51,11 @@ export async function POST(request:Request) {
     if (data.type==="open") {
       const [played,existing]=await Promise.all([db.query("SELECT 1 FROM match_presence WHERE match_id=$1 AND status='played' LIMIT 1",[data.matchId]),db.query("SELECT closed_at FROM match_ballot WHERE match_id=$1",[data.matchId])]);
       if (!played.rowCount) return Response.json({error:"Markera minst en spelare som deltagit innan omröstningen öppnas."},{status:409});
-      if (existing.rows[0]?.closed_at) return Response.json({error:"Den här omröstningen är redan stängd."},{status:409});
-      await db.query("INSERT INTO match_ballot(match_id,opened_by) VALUES($1,$2) ON CONFLICT(match_id) DO NOTHING",[data.matchId,session.user.id]);
+      if (existing.rows[0]?.closed_at) {
+        await db.query("UPDATE match_ballot SET opened_by=$2,opened_at=now(),closed_by=NULL,closed_at=NULL WHERE match_id=$1",[data.matchId,session.user.id]);
+      } else {
+        await db.query("INSERT INTO match_ballot(match_id,opened_by) VALUES($1,$2) ON CONFLICT(match_id) DO NOTHING",[data.matchId,session.user.id]);
+      }
     } else {
       const closed=await db.query("UPDATE match_ballot SET closed_by=$2,closed_at=now() WHERE match_id=$1 AND closed_at IS NULL RETURNING match_id",[data.matchId,session.user.id]);
       if (!closed.rowCount) return Response.json({error:"Omröstningen är inte öppen."},{status:409});
