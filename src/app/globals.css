@@ -1810,6 +1810,51 @@ tr.highlight td {
   color: var(--muted);
   line-height: 1.7;
 }
+.role-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:7px; }
+.role-actions .button { font-size:9px; padding:8px 10px; }
+.player-card-photo { height:0; position:relative; z-index:1; }
+.player-card-photo img,.player-card-photo > span,.avatar-photo { width:68px; height:68px; object-fit:cover; border-radius:50%; border:3px solid white; box-shadow:0 2px 8px #19191e24; }
+.player-card-photo img,.player-card-photo > span { position:absolute; left:50%; top:-34px; transform:translateX(-50%); }
+.player-card-photo > span { display:grid; place-items:center; background:var(--accent); color:white; font-weight:750; }
+.player-edit { width:calc(100% - 24px); margin:0 12px 10px; justify-content:center; }
+.photo-upload { display:grid; gap:8px; margin-top:15px; font-size:11px; font-weight:600; }
+.photo-upload input { width:100%; font-size:11px; }
+.match-voting { margin-top:24px; border-top:1px solid var(--line); padding-top:20px; }
+.voting-heading { display:flex; align-items:center; justify-content:space-between; }
+.voting-heading h3 { font:600 26px var(--heading); }
+.voting-heading svg { color:var(--accent); }
+.match-voting > p { margin-top:8px; color:var(--muted); line-height:1.6; font-size:11px; }
+.rating-results { display:grid; margin:16px 0; }
+.rating-results > div { display:grid; grid-template-columns:1fr auto; gap:3px 12px; padding:10px 0; border-bottom:1px solid var(--line); }
+.rating-results small { grid-column:2; color:var(--muted); text-align:right; }
+.motm-result { display:flex; align-items:center; gap:8px; background:var(--accent-wash); color:var(--accent-ink); padding:12px; margin-top:13px; border-radius:6px; }
+.motm-result span { margin-left:auto; font-size:10px; }
+.vote-form { display:grid; gap:13px; margin-top:18px; }
+.vote-form h4 { font-family:var(--heading); font-size:21px; }
+.vote-form fieldset { border:1px solid var(--line); border-radius:6px; padding:12px; min-width:0; }
+.vote-form legend { font-weight:700; padding:0 5px; }
+.star-choices { display:flex; gap:5px; }
+.star-choices label { flex:1; }
+.star-choices input { position:absolute; opacity:0; pointer-events:none; }
+.star-choices span { display:grid; place-items:center; padding:9px 4px; border:1px solid var(--line); border-radius:4px; color:var(--muted); font-size:10px; cursor:pointer; }
+.star-choices input:checked + span { background:var(--warning-wash); border-color:var(--warning-line); color:var(--warning-ink); }
+.star-choices input:focus-visible + span { outline:3px solid var(--blue); outline-offset:2px; }
+.motm-choice { display:flex; align-items:center; gap:8px; margin-top:10px; font-size:11px; }
+.vote-admin-actions { display:flex; justify-content:flex-end; margin-top:13px; }
+.presence-form { display:grid; gap:8px; margin-top:12px; }
+.presence-form > label { display:flex; justify-content:space-between; align-items:center; gap:12px; border-bottom:1px solid var(--line); padding:8px 0; }
+.presence-form select { border:1px solid var(--line); border-radius:5px; padding:8px; background:white; }
+.rating-season-panel { margin-top:22px; }
+.rating-season-panel td svg { color:var(--warning-ink); vertical-align:-2px; }
+@media (max-width:700px) {
+  .section-toolbar { flex-wrap:wrap; }
+  .section-toolbar > button { font-size:9px; }
+  .role-actions { width:100%; }
+  .role-actions .button { flex:1; }
+  .rating-results > div { font-size:10px; }
+  .star-choices span { font-size:9px; padding:9px 2px; }
+  .presence-form > label { align-items:flex-start; font-size:10px; }
+}
 .leaders-panel {
   margin-top: 22px;
 }

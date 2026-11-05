@@ -58,8 +58,9 @@ export const auth = betterAuth({
             message: "Den spelarprofilen är reserverad för lagadministratören.",
           });
         const player = await db.query(
-          "SELECT id,name FROM roster WHERE lower(name)=lower($1) AND user_id IS NULL",
-          [String(ctx.body?.name ?? "").trim()],
+          `SELECT id,name FROM roster WHERE lower(COALESCE(display_name,name))=lower($1) AND user_id IS NULL
+           AND ($3::boolean OR $2::text IS NULL OR lower(name)<>lower($2))`,
+          [String(ctx.body?.name ?? "").trim(),process.env.ADMIN_PLAYER_NAME ?? null,isAdmin(String(ctx.body?.email ?? ""))],
         );
         if (!player.rowCount)
           throw new APIError("BAD_REQUEST", {
@@ -97,10 +98,20 @@ export function isAdmin(email: string) {
     .includes(email.toLowerCase());
 }
 
-export async function isTeamLeader(userId: string, email: string) {
+export async function isTeamAdmin(userId: string, email: string) {
   if (isAdmin(email)) return true;
-  const result = await db.query("SELECT 1 FROM team_leader WHERE user_id=$1", [
+  const result = await db.query("SELECT 1 FROM team_admin WHERE user_id=$1", [
     userId,
   ]);
+  return Boolean(result.rowCount);
+}
+
+export async function isTeamLeader(userId: string, email: string) {
+  if (isAdmin(email)) return true;
+  const result = await db.query(
+    `SELECT 1 FROM team_leader WHERE user_id=$1
+     UNION ALL SELECT 1 FROM team_admin WHERE user_id=$1 LIMIT 1`,
+    [userId],
+  );
   return Boolean(result.rowCount);
 }
