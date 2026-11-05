@@ -78,7 +78,7 @@ const short = (name: string) =>
     .slice(0, 2)
     .join("");
 const labels = { yes: "Kommer", maybe: "Kanske", no: "Kan inte" };
-type VoteDetail={open:boolean;closed:boolean;eligible:boolean;players:{playerId:string;name:string;self:boolean}[];presence:{playerId:string;name:string;status:"played"|"spectator"}[];ratings:{playerId:string;average:number;count:number}[];motm:{playerId:string;count:number;closed:boolean}[];ownBallot:{motmPlayerId:string|null}|null;ownRatings:{playerId:string;stars:number}[]};
+type VoteDetail={open:boolean;closed:boolean;eligible:boolean;players:{playerId:string;name:string;self:boolean}[];presence:{playerId:string;name:string;status:"played"|"spectator"}[];ratings:{playerId:string;average:number}[];winnerId:string|null;ownBallot:{motmPlayerId:string|null}|null;ownRatings:{playerId:string;stars:number}[]};
 
 function Badge({
   name = "Inkastarna",
@@ -118,6 +118,10 @@ function TeamShirt({ size = 24 }: { size?: number }) {
       <path d="M16.5 11V20.5" stroke="#3679cf" />
     </svg>
   );
+}
+function StarRating({value,size=14}:{value:number;size?:number}) {
+  const shown=Math.max(3,Math.min(5,value));
+  return <span className="rating-stars" aria-label={`${shown.toFixed(1)} av 5 stjärnor`}>{[1,2,3,4,5].map((n)=><Star key={n} size={size} fill={n<=Math.round(shown)?"currentColor":"none"}/>)}</span>;
 }
 function Empty({
   icon: Icon = Flag,
@@ -1190,7 +1194,7 @@ export default function TeamApp() {
                   )}
                   {statisticsSeasonId === 9266 && <section className="panel rating-season-panel">
                     <div className="panel-heading"><div><span className="section-kicker">SÄSONGENS OM RÖSTNINGEN</span><h2>Spelarnas stjärnor</h2></div><Star size={21}/></div>
-                    {team?.seasonRatings.some((r)=>r.matches>0 || r.motm>0) ? <div className="table-wrap"><table><thead><tr><th>Spelare</th><th>Snitt</th><th>Betyg</th><th>Matcher</th><th>Man of the Match</th></tr></thead><tbody>{team.players.map((p)=>{const r=team.seasonRatings.find((x)=>x.playerId===p.id);return <tr key={p.id}><td><span className="player-name">{p.name}</span></td><td>{r?.average==null?"–":<><Star size={13} fill="currentColor"/> {r.average.toFixed(1)}</>}</td><td>{r?.matches?team.ratings.filter((x)=>x.playerId===p.id && !team.friendlyMatches.some((m)=>m.id===x.matchId)).reduce((n,x)=>n+x.count,0):0}</td><td>{r?.matches??0}</td><td>{r?.motm??0}</td></tr>})}</tbody></table></div>:<div className="panel-foot">Säsongens stjärnsnitt och Man of the Match visas efter att lagledaren öppnat och stängt den första omröstningen.</div>}
+                    {team?.seasonRatings.some((r)=>r.matches>0 || r.motm>0) ? <div className="table-wrap"><table><thead><tr><th>Spelare</th><th>Snitt</th><th>Matcher</th><th>Man of the Match</th></tr></thead><tbody>{team.players.map((p)=>{const r=team.seasonRatings.find((x)=>x.playerId===p.id);return <tr key={p.id}><td><span className="player-name">{p.name}</span></td><td>{r?.average==null?"–":<><StarRating value={r.average} size={13}/> {Math.max(3,r.average).toFixed(1)}</>}</td><td>{r?.matches??0}</td><td>{r?.motm??0}</td></tr>})}</tbody></table></div>:<div className="panel-foot">Säsongens stjärnsnitt och Man of the Match visas efter att lagledaren öppnat och stängt den första omröstningen.</div>}
                   </section>}
                     </>
                   )}
@@ -1685,7 +1689,7 @@ export default function TeamApp() {
               )}
             </p>
           </div>
-          {selected.friendly && team?.leader && <button className="button subtle full" onClick={()=>setFriendlyEditor(selected)}><Pencil size={15}/> Redigera träningsmatch</button>}
+          {selected.friendly && team?.leader && <><button className="button subtle full" onClick={()=>setFriendlyEditor(selected)}><Pencil size={15}/> Redigera träningsmatch</button><button className="button danger full" disabled={busy} onClick={async()=>{if(!window.confirm("Ta bort träningsmatchen och dess närvaro och omröstning?"))return;if(await save({type:"deleteFriendlyMatch",matchId:selected.id}))setSelected(null);}}><X size={15}/> Ta bort träningsmatch</button></>}
           {!selected.finished &&
             new Date(selected.startsAt).getTime() > Date.now() && (
               <>
@@ -2065,16 +2069,15 @@ function MatchPresence({match,team,save,busy}:{match:Match;team:TeamData;save:(d
 
 function MatchVoting({match,detail,team,busy,onAction}:{match:Match;detail:VoteDetail;team:TeamData|null;busy:boolean;onAction:(d:Record<string,unknown>)=>Promise<boolean>}) {
   const [stars,setStars]=useState<Record<string,string>>({}),[motm,setMotm]=useState("");
-  useEffect(()=>{setStars(Object.fromEntries(detail.ownRatings.map((r)=>[r.playerId,String(r.stars)])));setMotm(detail.ownBallot?.motmPlayerId??"");},[detail]);
-  const motmCount=Math.max(0,...detail.motm.map((r)=>r.count));
-  const leaders=detail.motm.filter((r)=>r.count===motmCount&&motmCount>0).map((r)=>detail.players.find((p)=>p.playerId===r.playerId)?.name).filter(Boolean);
+  useEffect(()=>{const defaults=Object.fromEntries(detail.players.filter((p)=>!p.self).map((p)=>[p.playerId,"3"]));setStars({...defaults,...Object.fromEntries(detail.ownRatings.map((r)=>[r.playerId,String(r.stars)]))});setMotm(detail.ownBallot?.motmPlayerId??"");},[detail]);
+  const orderedPlayers=detail.closed&&detail.winnerId?[...detail.players].sort((a,b)=>Number(b.playerId===detail.winnerId)-Number(a.playerId===detail.winnerId)):detail.players;
   return <section className="match-voting"><div className="voting-heading"><div><span className="section-kicker">EFTER MATCHEN</span><h3>Man of the Match</h3></div><Star size={21}/></div>
     <p>{detail.closed?"Omröstningen är stängd.":detail.open?"Omröstningen är öppen. Du kan ändra din röst tills den stängs.":"Lagledaren öppnar omröstningen när närvaron är registrerad."}</p>
-    {leaders.length>0&&<div className="motm-result"><Trophy size={17}/><strong>{detail.closed?"Man of the Match":"Leder just nu"}: {leaders.join(" & ")}</strong>{leaders.length>1&&detail.closed&&<span>Delad förstaplats</span>}</div>}
-    {detail.players.length===0?<div className="form-note">När spelare har markerats som deltagare kan omröstningen öppnas.</div>:<div className="rating-results">{detail.players.map((p)=>{const r=detail.ratings.find((x)=>x.playerId===p.playerId),m=detail.motm.find((x)=>x.playerId===p.playerId);return <div key={p.playerId}><span>{p.name}{leaders.includes(p.name)&&detail.closed?" 🏆":""}</span><span>{r?`${Number(r.average).toFixed(1)} ★ · ${r.count} betyg`:"–"}</span>{m?.count?<small>{m.count} MOTM-röster</small>:null}</div>})}</div>}
-    {detail.open&&detail.eligible&&<form className="vote-form" onSubmit={async(e)=>{e.preventDefault();await onAction({type:"vote",matchId:match.id,motmPlayerId:motm||null,ratings:Object.entries(stars).filter(([,v])=>v).map(([playerId,v])=>({playerId,stars:Number(v)}))});}}><h4>Dina stjärnor</h4>{detail.players.filter((p)=>!p.self).map((p)=><fieldset key={p.playerId}><legend>{p.name}</legend><div className="star-choices">{[1,2,3,4,5].map((n)=><label key={n} aria-label={`${n} stjärnor till ${p.name}`}><input type="radio" name={`stars-${p.playerId}`} value={n} checked={stars[p.playerId]===String(n)} onChange={()=>setStars({...stars,[p.playerId]:String(n)})}/><span>{n} ★</span></label>)}</div><label className="motm-choice"><input type="radio" name="motm" checked={motm===p.playerId} onChange={()=>setMotm(p.playerId)}/> Man of the Match</label></fieldset>)}<label className="motm-choice"><input type="radio" name="motm" checked={!motm} onChange={()=>setMotm("")}/> Avstå från MOTM</label>{detail.players.some((p)=>p.self)&&<p className="form-note">Du kan inte rösta på dig själv.</p>}<button className="button dark" disabled={busy}>Spara min röst <Check size={16}/></button></form>}
+    {detail.closed&&detail.winnerId&&<div className="motm-result"><Trophy size={17}/><strong>Man of the Match: {detail.players.find((p)=>p.playerId===detail.winnerId)?.name}</strong></div>}
+    {detail.players.length===0?<div className="form-note">När spelare har markerats som deltagare kan omröstningen öppnas.</div>:<div className="rating-results">{orderedPlayers.map((p)=>{const r=detail.ratings.find((x)=>x.playerId===p.playerId),isWinner=detail.closed&&detail.winnerId===p.playerId;return <div key={p.playerId} className={isWinner?"motm-winner-row":""}><span>{p.name}{isWinner?" 🏆":""}</span><span>{r?<><StarRating value={r.average} size={13}/> {Math.max(3,Number(r.average)).toFixed(1)}</>:"–"}</span></div>})}</div>}
+    {detail.open&&detail.eligible&&<form className="vote-form" onSubmit={async(e)=>{e.preventDefault();await onAction({type:"vote",matchId:match.id,motmPlayerId:motm||null,ratings:Object.entries(stars).filter(([,v])=>v).map(([playerId,v])=>({playerId,stars:Number(v)}))});}}><h4>Dina stjärnor</h4>{detail.players.filter((p)=>!p.self).map((p)=><fieldset key={p.playerId}><legend>{p.name}</legend><div className="star-choices">{[1,2,3,4,5].map((n)=><label key={n} aria-label={`${n} stjärnor till ${p.name}`}><input type="radio" name={`stars-${p.playerId}`} value={n} checked={stars[p.playerId]===String(n)} onChange={()=>setStars({...stars,[p.playerId]:String(n)})}/><span aria-hidden="true">{[1,2,3,4,5].map((s)=><Star key={s} size={17} fill={s<=n?"currentColor":"none"}/>)}</span></label>)}</div><label className="motm-choice"><input type="radio" name="motm" checked={motm===p.playerId} onChange={()=>setMotm(p.playerId)}/> Man of the Match</label></fieldset>)}<label className="motm-choice"><input type="radio" name="motm" checked={!motm} onChange={()=>setMotm("")}/> Avstå från MOTM</label>{detail.players.some((p)=>p.self)&&<p className="form-note">Du kan inte rösta på dig själv.</p>}<button className="button dark" disabled={busy}>Spara min röst <Check size={16}/></button></form>}
     {detail.open&&!detail.eligible&&<div className="form-note">Du får rösta om lagledaren markerat dig som spelare eller åskådare.</div>}
-    {team?.leader&&<div className="vote-admin-actions">{!detail.open&&!detail.closed&&<button className="button dark" disabled={busy||!detail.players.length} onClick={()=>void onAction({type:"open",matchId:match.id})}>Öppna omröstning</button>}{detail.closed&&<button className="button dark" disabled={busy||!detail.players.length} onClick={()=>void onAction({type:"open",matchId:match.id})}>Öppna omröstningen igen</button>}{detail.open&&<button className="button subtle" disabled={busy} onClick={()=>void onAction({type:"close",matchId:match.id})}>Stäng omröstning</button>}</div>}
+    {team?.leader&&<div className="vote-admin-actions">{!detail.open&&!detail.closed&&<button className="button dark" disabled={busy||!detail.players.length} onClick={()=>void onAction({type:"open",matchId:match.id})}>Öppna omröstning</button>}{detail.closed&&<><button className="button dark" disabled={busy||!detail.players.length} onClick={()=>void onAction({type:"open",matchId:match.id})}>Öppna omröstningen igen</button><button className="button danger" disabled={busy} onClick={()=>{if(window.confirm("Ta bort omröstningen och alla dess röster? Matchen ligger kvar."))void onAction({type:"delete",matchId:match.id});}}>Ta bort omröstning</button></>}{detail.open&&<button className="button subtle" disabled={busy} onClick={()=>void onAction({type:"close",matchId:match.id})}>Stäng omröstning</button>}</div>}
   </section>;
 }
 
