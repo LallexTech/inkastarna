@@ -27,10 +27,13 @@ import {
   Shield,
   Shirt,
   Smartphone,
+  Star,
   Target,
   Trophy,
   Users,
   X,
+  Pencil,
+  Plus,
 } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { calendarEvent } from "@/lib/calendar";
@@ -73,6 +76,7 @@ const short = (name: string) =>
     .slice(0, 2)
     .join("");
 const labels = { yes: "Kommer", maybe: "Kanske", no: "Kan inte" };
+type VoteDetail={open:boolean;closed:boolean;eligible:boolean;players:{playerId:string;name:string;self:boolean}[];presence:{playerId:string;name:string;status:"played"|"spectator"}[];ratings:{playerId:string;average:number;count:number}[];motm:{playerId:string;count:number;closed:boolean}[];ownBallot:{motmPlayerId:string|null}|null;ownRatings:{playerId:string;stars:number}[]};
 
 function Badge({
   name = "Inkastarna",
@@ -182,6 +186,9 @@ export default function TeamApp() {
     [profileOpen, setProfileOpen] = useState(false),
     [mobileOpen, setMobileOpen] = useState(false);
   const [inviteCode, setInviteCode] = useState("");
+  const [editPlayer, setEditPlayer] = useState<TeamData["players"][number] | null | undefined>(undefined);
+  const [friendlyEditor, setFriendlyEditor] = useState<Match | null | undefined>(undefined);
+  const [voteDetail, setVoteDetail] = useState<VoteDetail | null>(null);
   const [showInstallOffer, setShowInstallOffer] = useState(false);
   const [installed, setInstalled] = useState(false);
   const [selected, setSelected] = useState<Match | null>(null),
@@ -234,6 +241,17 @@ export default function TeamApp() {
       setTeamError(e instanceof Error ? e.message : "Laget kunde inte laddas.");
     }
   }, []);
+  const loadVoteDetail = useCallback(async (matchId:number) => {
+    try {
+      const response=await fetch(`/api/match-votes?matchId=${matchId}`,{cache:"no-store"});
+      if (response.ok) setVoteDetail(await response.json());
+      else setVoteDetail(null);
+    } catch { setVoteDetail(null); }
+  }, []);
+  useEffect(()=>{
+    if (selected?.finished && session) void loadVoteDetail(selected.id);
+    else setVoteDetail(null);
+  },[selected?.id,selected?.finished,session,loadVoteDetail,team?.matchPresence,team?.ballots,team?.ratings]);
   useEffect(() => {
     void loadLeague();
   }, [loadLeague]);
@@ -319,16 +337,17 @@ export default function TeamApp() {
     window.location.hash = tab;
     setMobileOpen(false);
   };
-  const matches = league?.matches.filter(mine) ?? [],
+  const matches = [...(league?.matches.filter(mine) ?? []), ...(team?.friendlyMatches ?? [])],
     upcoming = matches.filter(
       (m) => !m.finished && new Date(m.startsAt).getTime() > Date.now(),
     ),
-    played = matches.filter((m) => m.finished).reverse();
+    played = matches.filter((m) => m.finished).sort((a,b)=>new Date(b.startsAt).getTime()-new Date(a.startsAt).getTime());
   const next = upcoming[0],
     standing = league?.standings.find((s) => s.team === "Inkastarna");
   const points = standing?.points ?? 0,
     scored = standing?.goalsFor ?? 0;
   const totalPlayed = standing?.played ?? 0;
+  const displayUserName=team?.players.find((p)=>p.id===team.playerId)?.name??session?.user.name??"";
   const currentMatch = upcoming.find((m) => m.id === lineupMatch) ?? next;
   useEffect(() => {
     if (!currentMatch) return;
@@ -362,6 +381,27 @@ export default function TeamApp() {
     } finally {
       setBusy(false);
     }
+  }
+  async function voteAction(data:Record<string,unknown>,matchId:number) {
+    setBusy(true);
+    try {
+      const response=await fetch("/api/match-votes",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)});
+      const result=await response.json();
+      if (!response.ok) throw new Error(result.error||"Kunde inte spara omröstningen.");
+      await loadTeam(); await loadVoteDetail(matchId); notify("Omröstningen är uppdaterad.");
+      return true;
+    } catch(e) { notify(e instanceof Error?e.message:"Kunde inte spara omröstningen."); return false; }
+    finally { setBusy(false); }
+  }
+  async function uploadPlayerPhoto(playerId:string,file:File|null) {
+    setBusy(true);
+    try {
+      const form=new FormData(); form.set("playerId",playerId); if (file) form.set("photo",file); else form.set("remove","1");
+      const response=await fetch("/api/player-photo",{method:"POST",body:form}); const result=await response.json();
+      if (!response.ok) throw new Error(result.error||"Bilden kunde inte sparas.");
+      await loadTeam(); notify("Profilbilden är uppdaterad."); return true;
+    } catch(e) { notify(e instanceof Error?e.message:"Bilden kunde inte sparas."); return false; }
+    finally { setBusy(false); }
   }
   function download(m: Match) {
     const url = URL.createObjectURL(
@@ -601,10 +641,10 @@ export default function TeamApp() {
           )}
           {session ? (
             <button className="user-menu" onClick={() => setProfileOpen(true)}>
-              <span className="avatar">{short(session.user.name)}</span>
+              <span className="avatar">{short(displayUserName)}</span>
               <span>
-                <strong>{session.user.name}</strong>
-                <small>{team?.admin ? "Lagadministratör" : "Spelare"}</small>
+                <strong>{displayUserName}</strong>
+                <small>{team?.admin ? "Lagadministratör" : team?.leader ? "Lagledare" : "Spelare"}</small>
               </span>
               <ChevronRight size={16} />
             </button>
@@ -656,9 +696,9 @@ export default function TeamApp() {
               {session ? (
                 <>
                   <span className="avatar small">
-                    {short(session.user.name)}
+                    {short(displayUserName)}
                   </span>
-                  {session.user.name}
+                  {displayUserName}
                 </>
               ) : (
                 <>
@@ -921,7 +961,7 @@ export default function TeamApp() {
                           : `${played.length} spelade matcher`}
                       </h2>
                     </div>
-                    <CalendarDays size={21} />
+                    {active === "played" && team?.leader ? <button className="button subtle" onClick={()=>setFriendlyEditor(null)}><Plus size={15}/> Träningsmatch</button> : <CalendarDays size={21} />}
                   </div>
                   {(active === "upcoming" ? upcoming : played).length ? (
                     (active === "upcoming" ? upcoming : played).map(matchRow)
@@ -1057,6 +1097,10 @@ export default function TeamApp() {
                       )}
                     </section>
                   </div>
+                  <section className="panel rating-season-panel">
+                    <div className="panel-heading"><div><span className="section-kicker">SÄSONGENS OM RÖSTNINGEN</span><h2>Spelarnas stjärnor</h2></div><Star size={21}/></div>
+                    {team?.seasonRatings.some((r)=>r.matches>0 || r.motm>0) ? <div className="table-wrap"><table><thead><tr><th>Spelare</th><th>Snitt</th><th>Betyg</th><th>Matcher</th><th>Man of the Match</th></tr></thead><tbody>{team.players.map((p)=>{const r=team.seasonRatings.find((x)=>x.playerId===p.id);return <tr key={p.id}><td><span className="player-name">{p.name}</span></td><td>{r?.average==null?"–":<><Star size={13} fill="currentColor"/> {r.average.toFixed(1)}</>}</td><td>{r?.matches?team.ratings.filter((x)=>x.playerId===p.id && !team.friendlyMatches.some((m)=>m.id===x.matchId)).reduce((n,x)=>n+x.count,0):0}</td><td>{r?.matches??0}</td><td>{r?.motm??0}</td></tr>})}</tbody></table></div>:<div className="panel-foot">Säsongens stjärnsnitt och Man of the Match visas efter att lagledaren öppnat och stängt den första omröstningen.</div>}
+                  </section>
                 </>
               )}
               {active === "scorers" && (
@@ -1147,6 +1191,7 @@ export default function TeamApp() {
                         >
                           Min spelarprofil <ArrowUpRight size={15} />
                         </button>
+                        {team?.admin && <button className="button dark" onClick={()=>setEditPlayer(null)}><Plus size={15}/> Lägg till spelare</button>}
                       </div>
                       <div className="player-grid">
                         {(team?.players ?? []).map((p, i) => (
@@ -1156,10 +1201,14 @@ export default function TeamApp() {
                               <span>{p.number ?? "–"}</span>
                               <i>{String(i + 1).padStart(2, "0")}</i>
                             </div>
+                            <div className="player-card-photo">
+                              {p.photoUrl ? <Image src={`/api/player-photo?id=${encodeURIComponent(p.id)}`} alt={`Profilbild: ${p.name}`} width={68} height={68} unoptimized /> : <span>{short(p.name)}</span>}
+                            </div>
                             <div className="player-card-name">
                               <h3>{p.name}</h3>
                               <span>{p.position}</span>
                             </div>
+                            {team?.admin && <button className="player-edit button subtle" onClick={()=>setEditPlayer(p)}><Pencil size={14}/> Redigera</button>}
                             <div className="player-card-stats">
                               <span>
                                 <b>{p.appearances}</b>matcher
@@ -1190,25 +1239,17 @@ export default function TeamApp() {
                           <div className="leader-list">
                             {(team?.players ?? []).map((p) => {
                               const isLeader = team?.teamLeads.includes(p.id) ?? false;
+                              const isAdmin = p.admin ?? (team?.teamAdmins.includes(p.id) ?? false);
                               return (
                                 <div key={p.id}>
                                   <span>
                                     {p.name}
                                     {!p.hasAccount && <small> · behöver skapa konto</small>}
                                   </span>
-                                  <button
-                                    className={`button ${isLeader ? "subtle" : "dark"}`}
-                                    disabled={busy || !p.hasAccount}
-                                    onClick={() =>
-                                      void save({
-                                        type: "teamLeader",
-                                        playerId: p.id,
-                                        enabled: !isLeader,
-                                      })
-                                    }
-                                  >
-                                    {isLeader ? "Ta bort lagledare" : "Gör till lagledare"}
-                                  </button>
+                                  <div className="role-actions">
+                                    <button className={`button ${isLeader ? "subtle" : "dark"}`} disabled={busy || !p.hasAccount} onClick={()=>void save({type:"teamLeader",playerId:p.id,enabled:!isLeader})}>{isLeader ? "Ta bort lagledare" : "Gör till lagledare"}</button>
+                                    <button className={`button ${isAdmin ? "subtle" : "dark"}`} disabled={busy || !p.hasAccount || p.rootAdmin} onClick={()=>void save({type:"teamAdmin",playerId:p.id,enabled:!isAdmin})}>{p.rootAdmin ? "Huvudadministratör" : isAdmin ? "Ta bort admin" : "Gör till admin"}</button>
+                                  </div>
                                 </div>
                               );
                             })}
@@ -1254,7 +1295,7 @@ export default function TeamApp() {
                                   </option>
                                 ))}
                               </select>
-                              {team?.admin && (
+                              {team?.leader && (
                                 <>
                                   <label htmlFor="lineup-formation">Formation</label>
                                   <select
@@ -1292,7 +1333,7 @@ export default function TeamApp() {
                                       )?.number ?? "+"}
                                     </b>
                                   </span>
-                                  {team?.admin ? (
+                                  {team?.leader ? (
                                     <select
                                       aria-label={`Spelare: ${label}`}
                                       value={slots[i] ?? ""}
@@ -1336,7 +1377,7 @@ export default function TeamApp() {
                                 {slots.filter(Boolean).length}/5 platser
                                 tillsatta
                               </span>
-                              {team?.admin && (
+                              {team?.leader && (
                                 <button
                                   className="button dark"
                                   disabled={busy || !lineupDirty}
@@ -1503,8 +1544,11 @@ export default function TeamApp() {
           busy={busy}
           onClose={() => setProfileOpen(false)}
           onSave={save}
+          onPhoto={uploadPlayerPhoto}
         />
       )}
+      {editPlayer !== undefined && team?.admin && <PlayerEditorModal player={editPlayer} busy={busy} onClose={()=>setEditPlayer(undefined)} onSave={save} onPhoto={uploadPlayerPhoto} />}
+      {friendlyEditor !== undefined && team?.leader && <FriendlyMatchEditorModal match={friendlyEditor} busy={busy} onClose={()=>setFriendlyEditor(undefined)} onSave={save} />}
       {selected && (
         <Modal
           title={selected.finished ? "Matchresultat" : "Match & kallelse"}
@@ -1548,13 +1592,14 @@ export default function TeamApp() {
               )}
             </p>
           </div>
+          {selected.friendly && team?.leader && <button className="button subtle full" onClick={()=>setFriendlyEditor(selected)}><Pencil size={15}/> Redigera träningsmatch</button>}
           {!selected.finished &&
             new Date(selected.startsAt).getTime() > Date.now() && (
               <>
                 {session ? (
                   <>
                     <h3 className="rsvp-title">
-                      Är du med, {session.user.name}?
+                      Är du med, {displayUserName}?
                     </h3>
                     <div className="rsvp-options">
                       {(["yes", "maybe", "no"] as const).map((s) => (
@@ -1639,17 +1684,19 @@ export default function TeamApp() {
                 </div>
               </>
             )}
-          {selected.finished && team?.admin && (
+          {selected.finished && team?.leader && !selected.friendly && (
             <MatchStats match={selected} team={team} save={save} busy={busy} />
           )}
-          <a
+          {selected.finished && team?.leader && <MatchPresence match={selected} team={team} save={save} busy={busy} />}
+          {selected.finished && session && voteDetail && <MatchVoting match={selected} detail={voteDetail} team={team} busy={busy} onAction={(data)=>voteAction(data,selected.id)} />}
+          {!selected.friendly && <a
             className="source-link"
             href={`https://korpenstockholm.zoezi.se/match/${selected.id}`}
             target="_blank"
             rel="noreferrer"
           >
             Matchen hos Korpen <ExternalLink size={14} />
-          </a>
+          </a>}
         </Modal>
       )}
     </div>
@@ -1803,21 +1850,23 @@ function ProfileModal({
   busy,
   onClose,
   onSave,
+  onPhoto,
 }: {
   team: TeamData | null;
   session: { user: { name: string; email: string } };
   busy: boolean;
   onClose: () => void;
   onSave: (d: Record<string, unknown>) => Promise<boolean>;
+  onPhoto:(playerId:string,file:File|null)=>Promise<boolean>;
 }) {
   const player = team?.players.find((p) => p.id === team.playerId);
   const [copied, setCopied] = useState(false);
   return (
     <Modal title="Min spelarprofil" onClose={onClose}>
       <div className="profile-intro">
-        <span className="avatar">{short(session.user.name)}</span>
+        {player?.photoUrl ? <Image className="avatar-photo" src={`/api/player-photo?id=${encodeURIComponent(player.id)}`} alt={`Profilbild: ${player.name}`} width={58} height={58} unoptimized/> : <span className="avatar">{short(player?.name??session.user.name)}</span>}
         <div>
-          <h3>{session.user.name}</h3>
+          <h3>{player?.name??session.user.name}</h3>
           <p>{session.user.email}</p>
         </div>
       </div>
@@ -1861,6 +1910,8 @@ function ProfileModal({
           Spara profil <Check size={16} />
         </button>
       </form>
+      {player && <label className="photo-upload">Profilbild<input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={async(e)=>{const file=e.currentTarget.files?.[0];if(file) await onPhoto(player.id,file);e.currentTarget.value="";}}/></label>}
+      {player?.photoUrl && <button className="auth-switch" disabled={busy} onClick={()=>void onPhoto(player.id,null)}>Ta bort profilbild</button>}
       {team?.admin && team.inviteCode && (
         <button
           className="auth-switch"
@@ -1893,6 +1944,45 @@ function ProfileModal({
       </button>
     </Modal>
   );
+}
+
+function PlayerEditorModal({player,busy,onClose,onSave,onPhoto}:{player:TeamData["players"][number]|null;busy:boolean;onClose:()=>void;onSave:(d:Record<string,unknown>)=>Promise<boolean>;onPhoto:(id:string,file:File|null)=>Promise<boolean>}) {
+  return <Modal title={player?"Redigera spelarprofil":"Lägg till spelare"} onClose={onClose}>
+    {player?.photoUrl && <div className="profile-intro"><Image className="avatar-photo" src={`/api/player-photo?id=${encodeURIComponent(player.id)}`} alt={`Profilbild: ${player.name}`} width={58} height={58} unoptimized/><span>{player.name}</span></div>}
+    <form className="auth-form" onSubmit={async(e)=>{e.preventDefault();const f=new FormData(e.currentTarget);const ok=await onSave({type:"rosterPlayer",...(player?{playerId:player.id}:{}),name:f.get("name"),number:f.get("number")?Number(f.get("number")):null,position:f.get("position")});if(ok)onClose();}}>
+      <label>Namn<input name="name" defaultValue={player?.name??""} maxLength={80} required/></label>
+      <div className="form-columns"><label>Tröjnummer<input name="number" type="number" min="1" max="99" defaultValue={player?.number??""}/></label><label>Position<select name="position" defaultValue={player?.position??"Allround"}>{["Allround","Målvakt","Back","Mittfältare","Anfallare"].map((x)=><option key={x}>{x}</option>)}</select></label></div>
+      <button className="button dark full" disabled={busy}>Spara spelare <Check size={16}/></button>
+    </form>
+    {player && <label className="photo-upload">Profilbild<input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={async(e)=>{const file=e.currentTarget.files?.[0];if(file)await onPhoto(player.id,file);e.currentTarget.value="";}}/></label>}
+    {player?.photoUrl && <button className="auth-switch" disabled={busy} onClick={()=>void onPhoto(player.id,null)}>Ta bort profilbild</button>}
+  </Modal>;
+}
+
+function FriendlyMatchEditorModal({match,busy,onClose,onSave}:{match:Match|null;busy:boolean;onClose:()=>void;onSave:(d:Record<string,unknown>)=>Promise<boolean>}) {
+  const localValue=match?new Date(new Date(match.startsAt).getTime()-new Date(match.startsAt).getTimezoneOffset()*60000).toISOString().slice(0,16):"";
+  return <Modal title={match?"Redigera träningsmatch":"Lägg till träningsmatch"} onClose={onClose}><p className="form-note">Lägg in matchen efter att den spelats. Träningsmatcher visas separat och påverkar inte säsongens officiella stjärnsnitt.</p><form className="auth-form" onSubmit={async(e)=>{e.preventDefault();const f=new FormData(e.currentTarget);const ok=await onSave({type:"friendlyMatch",...(match?{matchId:match.id}:{}),opponent:f.get("opponent"),startsAt:new Date(String(f.get("startsAt"))).toISOString()});if(ok)onClose();}}><label>Motståndare<input name="opponent" defaultValue={match?.away??""} maxLength={100} required/></label><label>Datum och tid<input name="startsAt" type="datetime-local" defaultValue={localValue} required/></label><button className="button dark full" disabled={busy}>Spara träningsmatch <Check size={16}/></button></form></Modal>;
+}
+
+function MatchPresence({match,team,save,busy}:{match:Match;team:TeamData;save:(d:Record<string,unknown>)=>Promise<boolean>;busy:boolean}) {
+  const [values,setValues]=useState<Record<string,string>>({});
+  useEffect(()=>{const next:Record<string,string>={};for(const p of team.players){const marked=team.matchPresence.find((x)=>x.matchId===match.id&&x.playerId===p.id);const stats=team.playerMatchStats.find((x)=>x.matchId===match.id&&x.playerId===p.id);next[p.id]=marked?.status??(stats?.played?"played":"absent");}setValues(next);},[match.id,team.players,team.matchPresence,team.playerMatchStats]);
+  return <details className="admin-stats"><summary>Hantera närvaro och deltagare</summary><p>Spelare och åskådare som markerats här får rösta. Bara spelare som deltog kan få stjärnor.</p><form className="presence-form" onSubmit={async(e)=>{e.preventDefault();await save({type:"presence",matchId:match.id,players:team.players.map((p)=>({playerId:p.id,status:values[p.id]??"absent"}))});}}>{team.players.map((p)=><label key={p.id}><span>{p.name}</span><select aria-label={`Närvaro: ${p.name}`} value={values[p.id]??"absent"} onChange={(e)=>setValues({...values,[p.id]:e.target.value})}><option value="absent">Ej närvarande</option><option value="played">Spelade</option><option value="spectator">Åskådare</option></select></label>)}<button className="button dark" disabled={busy}>Spara närvaro</button></form></details>;
+}
+
+function MatchVoting({match,detail,team,busy,onAction}:{match:Match;detail:VoteDetail;team:TeamData|null;busy:boolean;onAction:(d:Record<string,unknown>)=>Promise<boolean>}) {
+  const [stars,setStars]=useState<Record<string,string>>({}),[motm,setMotm]=useState("");
+  useEffect(()=>{setStars(Object.fromEntries(detail.ownRatings.map((r)=>[r.playerId,String(r.stars)])));setMotm(detail.ownBallot?.motmPlayerId??"");},[detail]);
+  const motmCount=Math.max(0,...detail.motm.map((r)=>r.count));
+  const leaders=detail.motm.filter((r)=>r.count===motmCount&&motmCount>0).map((r)=>detail.players.find((p)=>p.playerId===r.playerId)?.name).filter(Boolean);
+  return <section className="match-voting"><div className="voting-heading"><div><span className="section-kicker">EFTER MATCHEN</span><h3>Man of the Match</h3></div><Star size={21}/></div>
+    <p>{detail.closed?"Omröstningen är stängd.":detail.open?"Omröstningen är öppen. Du kan ändra din röst tills den stängs.":"Lagledaren öppnar omröstningen när närvaron är registrerad."}</p>
+    {leaders.length>0&&<div className="motm-result"><Trophy size={17}/><strong>{detail.closed?"Man of the Match":"Leder just nu"}: {leaders.join(" & ")}</strong>{leaders.length>1&&detail.closed&&<span>Delad förstaplats</span>}</div>}
+    {detail.players.length===0?<div className="form-note">När spelare har markerats som deltagare kan omröstningen öppnas.</div>:<div className="rating-results">{detail.players.map((p)=>{const r=detail.ratings.find((x)=>x.playerId===p.playerId),m=detail.motm.find((x)=>x.playerId===p.playerId);return <div key={p.playerId}><span>{p.name}{leaders.includes(p.name)&&detail.closed?" 🏆":""}</span><span>{r?`${Number(r.average).toFixed(1)} ★ · ${r.count} betyg`:"–"}</span>{m?.count?<small>{m.count} MOTM-röster</small>:null}</div>})}</div>}
+    {detail.open&&detail.eligible&&<form className="vote-form" onSubmit={async(e)=>{e.preventDefault();await onAction({type:"vote",matchId:match.id,motmPlayerId:motm||null,ratings:Object.entries(stars).filter(([,v])=>v).map(([playerId,v])=>({playerId,stars:Number(v)}))});}}><h4>Dina stjärnor</h4>{detail.players.filter((p)=>!p.self).map((p)=><fieldset key={p.playerId}><legend>{p.name}</legend><div className="star-choices">{[1,2,3,4,5].map((n)=><label key={n} aria-label={`${n} stjärnor till ${p.name}`}><input type="radio" name={`stars-${p.playerId}`} value={n} checked={stars[p.playerId]===String(n)} onChange={()=>setStars({...stars,[p.playerId]:String(n)})}/><span>{n} ★</span></label>)}</div><label className="motm-choice"><input type="radio" name="motm" checked={motm===p.playerId} onChange={()=>setMotm(p.playerId)}/> Man of the Match</label></fieldset>)}<label className="motm-choice"><input type="radio" name="motm" checked={!motm} onChange={()=>setMotm("")}/> Avstå från MOTM</label>{detail.players.some((p)=>p.self)&&<p className="form-note">Du kan inte rösta på dig själv.</p>}<button className="button dark" disabled={busy}>Spara min röst <Check size={16}/></button></form>}
+    {detail.open&&!detail.eligible&&<div className="form-note">Du får rösta om lagledaren markerat dig som spelare eller åskådare.</div>}
+    {team?.leader&&<div className="vote-admin-actions">{!detail.open&&!detail.closed&&<button className="button dark" disabled={busy||!detail.players.length} onClick={()=>void onAction({type:"open",matchId:match.id})}>Öppna omröstning</button>}{detail.open&&<button className="button subtle" disabled={busy} onClick={()=>void onAction({type:"close",matchId:match.id})}>Stäng omröstning</button>}</div>}
+  </section>;
 }
 
 function MatchStats({
