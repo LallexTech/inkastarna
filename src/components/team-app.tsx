@@ -1466,9 +1466,10 @@ export default function TeamApp() {
               <strong>iPhone eller iPad</strong>
               <p>
                 Öppna sidan i Safari, tryck på <b>Dela</b> och välj{" "}
-                <b>Lägg till på hemskärmen</b>. Tryck på <b>Lägg till</b> och
-                starta sedan Inkastarna från den nya ikonen. iOS kräver de här
-                stegen manuellt.
+                <b>Lägg till på hemskärmen</b>. Slå på{" "}
+                <b>Öppna som webbapp</b> och tryck på <b>Lägg till</b>. Starta
+                sedan Inkastarna från den nya ikonen. iOS kräver de här stegen
+                manuellt.
               </p>
             </div>
           ) : installPlatform === "android" ? (
