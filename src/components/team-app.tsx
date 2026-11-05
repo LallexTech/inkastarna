@@ -66,8 +66,10 @@ const date = (value: string, options: Intl.DateTimeFormatOptions) =>
 const time = (value: string) =>
   date(value, { hour: "2-digit", minute: "2-digit" });
 const day = (value: string) => date(value, { day: "numeric", month: "long" });
-const mine = (m: Match) => m.homeId === 27757 || m.awayId === 27757;
-const opponent = (m: Match) => (m.homeId === 27757 ? m.away : m.home);
+const mine = (m: Match) =>
+  m.homeId === 27757 || m.awayId === 27757 || m.home === "Inkastarna" || m.away === "Inkastarna";
+const opponent = (m: Match) =>
+  m.homeId === 27757 || m.home === "Inkastarna" ? m.away : m.home;
 const short = (name: string) =>
   name
     .split(" ")
@@ -178,6 +180,10 @@ export default function TeamApp() {
     [stale, setStale] = useState(false),
     [loading, setLoading] = useState(true),
     [error, setError] = useState("");
+  const [statisticsSeasonId, setStatisticsSeasonId] = useState(9266),
+    [archiveLeague, setArchiveLeague] = useState<League | null>(null),
+    [archiveLoading, setArchiveLoading] = useState(false),
+    [archiveError, setArchiveError] = useState("");
   const [team, setTeam] = useState<TeamData | null>(null),
     [teamError, setTeamError] = useState("");
   const { data: session } = authClient.useSession();
@@ -255,6 +261,35 @@ export default function TeamApp() {
   useEffect(() => {
     void loadLeague();
   }, [loadLeague]);
+  useEffect(() => {
+    if (statisticsSeasonId === 9266) {
+      setArchiveLeague(null);
+      setArchiveLoading(false);
+      setArchiveError("");
+      return;
+    }
+    const controller = new AbortController();
+    setArchiveLoading(true);
+    setArchiveError("");
+    fetch(`/api/league/history?divisionId=${statisticsSeasonId}`, {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Säsongen kunde inte hämtas.");
+        setArchiveLeague(data);
+      })
+      .catch((loadError) => {
+        if (loadError instanceof DOMException && loadError.name === "AbortError") return;
+        setArchiveLeague(null);
+        setArchiveError(loadError instanceof Error ? loadError.message : "Säsongen kunde inte hämtas.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setArchiveLoading(false);
+      });
+    return () => controller.abort();
+  }, [statisticsSeasonId]);
   useEffect(() => {
     if (session) void loadTeam();
     else setTeam(null);
@@ -344,9 +379,12 @@ export default function TeamApp() {
     played = matches.filter((m) => m.finished).sort((a,b)=>new Date(b.startsAt).getTime()-new Date(a.startsAt).getTime());
   const next = upcoming[0],
     standing = league?.standings.find((s) => s.team === "Inkastarna");
-  const points = standing?.points ?? 0,
-    scored = standing?.goalsFor ?? 0;
   const totalPlayed = standing?.played ?? 0;
+  const statisticsLeague = statisticsSeasonId === 9266 ? league : archiveLeague;
+  const statisticsStanding = statisticsLeague?.standings.find((s) => s.team === "Inkastarna");
+  const statisticsResults = (statisticsLeague?.matches.filter((m) => mine(m) && m.finished) ?? [])
+    .sort((a, b) => b.startsAt.localeCompare(a.startsAt));
+  const statisticsPlayed = statisticsStanding?.played ?? statisticsResults.length;
   const displayUserName=team?.players.find((p)=>p.id===team.playerId)?.name??session?.user.name??"";
   const currentMatch = upcoming.find((m) => m.id === lineupMatch) ?? next;
   useEffect(() => {
@@ -538,7 +576,11 @@ export default function TeamApp() {
       </div>
     );
   }
-  function statCards() {
+  function statCards(source = league, includeRoster = true) {
+    const seasonStanding = source?.standings.find((s) => s.team === "Inkastarna");
+    const seasonMatches = source?.matches.filter(mine).length ?? 0;
+    const seasonPlayed = seasonStanding?.played ?? source?.matches.filter((m) => mine(m) && m.finished).length ?? 0;
+    const seasonPoints = seasonStanding?.points ?? 0;
     return (
       <div className="stat-grid">
         <div>
@@ -546,13 +588,13 @@ export default function TeamApp() {
             Spelade matcher <Flag size={16} />
           </span>
           <strong>
-            {totalPlayed}
-            <small>/ {matches.length}</small>
+            {seasonPlayed}
+            <small>/ {seasonMatches}</small>
           </strong>
           <p>
-            {totalPlayed === 0
+            {seasonPlayed === 0
               ? "Säsongen väntar på avspark"
-              : `${standing?.won ?? 0} vinster · ${standing?.drawn ?? 0} oavgjorda`}
+              : `${seasonStanding?.won ?? 0} vinster · ${seasonStanding?.drawn ?? 0} oavgjorda`}
           </p>
         </div>
         <div>
@@ -560,12 +602,12 @@ export default function TeamApp() {
             Poäng <Trophy size={17} />
           </span>
           <strong>
-            {points}
+            {seasonPoints}
             <small>p</small>
           </strong>
           <p>
-            {totalPlayed
-              ? `${(points / totalPlayed).toFixed(1)} poäng per match`
+            {seasonPlayed
+              ? `${(seasonPoints / seasonPlayed).toFixed(1)} poäng per match`
               : "Nya matcher. Nya möjligheter."}
           </p>
         </div>
@@ -574,20 +616,20 @@ export default function TeamApp() {
             Gjorda mål <Target size={17} />
           </span>
           <strong>
-            {scored}
+            {seasonStanding?.goalsFor ?? 0}
             <small>mål</small>
           </strong>
-          <p>{standing?.goalsAgainst ?? 0} insläppta mål</p>
+          <p>{seasonStanding?.goalsAgainst ?? 0} insläppta mål</p>
         </div>
         <div>
           <span>
-            Truppen <Users size={17} />
+            {includeRoster ? "Truppen" : "Målskillnad"} {includeRoster ? <Users size={17} /> : <Flag size={16} />}
           </span>
           <strong>
-            {team?.players.length ?? 10}
-            <small>spelare</small>
+            {includeRoster ? (team?.players.length ?? 10) : (seasonStanding?.difference ?? 0)}
+            <small>{includeRoster ? "spelare" : "målskillnad"}</small>
           </strong>
-          <p>En för alla. Alla för Inkastarna.</p>
+          <p>{includeRoster ? "En för alla. Alla för Inkastarna." : "Gjorda mål minus insläppta mål"}</p>
         </div>
       </div>
     );
@@ -1019,25 +1061,44 @@ export default function TeamApp() {
               )}
               {active === "statistics" && (
                 <>
-                  {statCards()}
+                  <div className="history-toolbar">
+                    <label htmlFor="statistics-season">Säsong</label>
+                    <select
+                      id="statistics-season"
+                      value={statisticsSeasonId}
+                      onChange={(event) => setStatisticsSeasonId(Number(event.target.value))}
+                    >
+                      <option value={9266}>2026/27 · Pågående</option>
+                      <option value={7862}>2025/26</option>
+                      <option value={6323}>2024/25</option>
+                    </select>
+                  </div>
+                  {archiveLoading && <div className="notice inset">Hämtar säsongens statistik…</div>}
+                  {archiveError && <div className="notice inset">{archiveError}</div>}
+                  {statisticsLeague && !archiveLoading && (
+                    <>
+                  {statCards(statisticsLeague, statisticsSeasonId === 9266)}
                   <div className="dashboard-grid">
                     <section className="panel">
                       <div className="panel-heading">
-                        <h2>Säsongen i siffror</h2>
+                        <div>
+                          <span className="section-kicker">{statisticsLeague.season}</span>
+                          <h2>Säsongen i siffror</h2>
+                        </div>
                         <Activity size={20} />
                       </div>
                       <div className="season-breakdown">
                         {[
-                          ["Vinster", standing?.won ?? 0],
-                          ["Oavgjorda", standing?.drawn ?? 0],
-                          ["Förluster", standing?.lost ?? 0],
+                          ["Vinster", statisticsStanding?.won ?? 0],
+                          ["Oavgjorda", statisticsStanding?.drawn ?? 0],
+                          ["Förluster", statisticsStanding?.lost ?? 0],
                         ].map(([label, value]) => (
                           <div key={label}>
                             <span>{label}</span>
                             <div className="stat-track">
                               <i
                                 style={{
-                                  width: `${totalPlayed ? (Number(value) / totalPlayed) * 100 : 0}%`,
+                                  width: `${statisticsPlayed ? (Number(value) / statisticsPlayed) * 100 : 0}%`,
                                 }}
                               />
                             </div>
@@ -1046,7 +1107,7 @@ export default function TeamApp() {
                         ))}
                       </div>
                       <div className="panel-foot">
-                        {totalPlayed
+                        {statisticsPlayed
                           ? "Baserat på Korpens officiella resultat."
                           : "Statistiken fylls på efter säsongens första match."}
                       </div>
@@ -1056,24 +1117,24 @@ export default function TeamApp() {
                         <h2>Senaste formen</h2>
                         <Flag size={20} />
                       </div>
-                      {played.length ? (
+                      {statisticsResults.length ? (
                         <div className="form-run">
-                          {played
+                          {statisticsResults
                             .slice(0, 5)
                             .reverse()
                             .map((m) => {
+                              const homeIsOurs = m.home === "Inkastarna" || statisticsLeague.teamId === m.homeId;
                               const a =
-                                  m.homeId === 27757
+                                  homeIsOurs
                                     ? m.homeScore
                                     : m.awayScore,
                                 b =
-                                  m.homeId === 27757
+                                  homeIsOurs
                                     ? m.awayScore
                                     : m.homeScore;
                               return (
-                                <button
+                                <span
                                   key={m.id}
-                                  onClick={() => setSelected(m)}
                                   className={`form-badge ${a != null && b != null ? (a > b ? "win" : a === b ? "draw" : "loss") : ""}`}
                                 >
                                   {a == null || b == null
@@ -1083,7 +1144,7 @@ export default function TeamApp() {
                                       : a === b
                                         ? "O"
                                         : "F"}
-                                </button>
+                                </span>
                               );
                             })}
                         </div>
@@ -1097,10 +1158,42 @@ export default function TeamApp() {
                       )}
                     </section>
                   </div>
-                  <section className="panel rating-season-panel">
+                  {statisticsSeasonId !== 9266 && (
+                    <section className="panel archive-results">
+                      <div className="panel-heading">
+                        <div>
+                          <span className="section-kicker">OFFICIELLA MATCHER</span>
+                          <h2>Resultat för Inkastarna</h2>
+                        </div>
+                        <Flag size={20} />
+                      </div>
+                      {statisticsResults.length ? (
+                        <div className="table-wrap">
+                          <table>
+                            <thead><tr><th>Datum</th><th>Motståndare</th><th>Resultat</th><th>Utfall</th></tr></thead>
+                            <tbody>
+                              {statisticsResults.map((match) => {
+                                const homeIsOurs = match.home === "Inkastarna" || statisticsLeague.teamId === match.homeId;
+                                const goalsFor = homeIsOurs ? match.homeScore : match.awayScore;
+                                const goalsAgainst = homeIsOurs ? match.awayScore : match.homeScore;
+                                const outcome = goalsFor == null || goalsAgainst == null ? "Ej rapporterat" : goalsFor > goalsAgainst ? "Vinst" : goalsFor === goalsAgainst ? "Oavgjort" : "Förlust";
+                                return <tr key={match.id}><td>{date(match.startsAt, { day: "numeric", month: "short" })}</td><td>{opponent(match)}</td><td><b>{goalsFor ?? "–"} : {goalsAgainst ?? "–"}</b></td><td>{outcome}</td></tr>;
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <div className="panel-foot">Inga matchresultat för Inkastarna finns i den här serien.</div>
+                      )}
+                      <a className="source-link" href={`https://korpenstockholm.zoezi.se/serie/${statisticsSeasonId}`} target="_blank" rel="noreferrer">Visa originalserien hos Korpen <ExternalLink size={14} /></a>
+                    </section>
+                  )}
+                  {statisticsSeasonId === 9266 && <section className="panel rating-season-panel">
                     <div className="panel-heading"><div><span className="section-kicker">SÄSONGENS OM RÖSTNINGEN</span><h2>Spelarnas stjärnor</h2></div><Star size={21}/></div>
                     {team?.seasonRatings.some((r)=>r.matches>0 || r.motm>0) ? <div className="table-wrap"><table><thead><tr><th>Spelare</th><th>Snitt</th><th>Betyg</th><th>Matcher</th><th>Man of the Match</th></tr></thead><tbody>{team.players.map((p)=>{const r=team.seasonRatings.find((x)=>x.playerId===p.id);return <tr key={p.id}><td><span className="player-name">{p.name}</span></td><td>{r?.average==null?"–":<><Star size={13} fill="currentColor"/> {r.average.toFixed(1)}</>}</td><td>{r?.matches?team.ratings.filter((x)=>x.playerId===p.id && !team.friendlyMatches.some((m)=>m.id===x.matchId)).reduce((n,x)=>n+x.count,0):0}</td><td>{r?.matches??0}</td><td>{r?.motm??0}</td></tr>})}</tbody></table></div>:<div className="panel-foot">Säsongens stjärnsnitt och Man of the Match visas efter att lagledaren öppnat och stängt den första omröstningen.</div>}
-                  </section>
+                  </section>}
+                    </>
+                  )}
                 </>
               )}
               {active === "scorers" && (

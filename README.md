@@ -5,10 +5,11 @@ Lagappen för Inkastarna. Innefotboll, 2 × 15 minuter, Stora Mossen. Next.js, R
 - Förhandsmiljö: https://pre--inkastarna.netlify.app
 - Produktion efter releasegodkännande: https://inkastarna.netlify.app
 - Officiell serie: https://korpenstockholm.zoezi.se/serie/9266
+- Arkivserier: 2025/26 (https://korpenstockholm.zoezi.se/serie/7862) och 2024/25 (https://korpenstockholm.zoezi.se/serie/6323)
 
 ## Funktioner
 
-Översikt, kommande och spelade matcher, statistik, intern skytteliga, officiell tabell, trupp och en sparbar femmannauppställning i 1–2–1 eller 2–2. Spelarna kan registrera sig med lagkod, logga in, ange tröjnummer/position och svara kommer/kanske/kan inte på kommande matcher. Lagledaren sparar laguppställning och registrerar mål, assist och deltagande för färdigspelade matcher från matchens detaljvy. I Truppen kan lagledare utse fler lagledare bland spelare som har konto.
+Översikt, kommande och spelade matcher, statistik med säsongsväljare för tidigare år, intern skytteliga, officiell tabell, trupp och en sparbar femmannauppställning i 1–2–1 eller 2–2. Spelarna kan registrera sig med lagkod, logga in, ange tröjnummer/position och svara kommer/kanske/kan inte på kommande matcher. Lagledaren sparar laguppställning och registrerar mål, assist och deltagande för färdigspelade matcher från matchens detaljvy. I Truppen kan lagledare utse fler lagledare bland spelare som har konto.
 
 PWA med manifest, Android-ikoner, maskbar ikon, Apple-ikon, plattformsanpassad installationsguide och en offlinesida. Android kan visa webbläsarens installationsruta; iOS kräver att användaren själv väljer Dela → Lägg till på hemskärmen i Safari. Spelaruppgifter och autentiserade API-svar sparas inte i service worker-cachen. Internet krävs för aktuell data och kallelsesvar.
 
