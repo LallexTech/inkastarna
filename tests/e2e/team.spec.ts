@@ -46,6 +46,7 @@ test.afterAll(async () => {
     await sql.query("DELETE FROM match_vote WHERE match_id=ANY($1::int[])",[friendlyIds]);
     await sql.query("DELETE FROM match_presence WHERE match_id=ANY($1::int[])",[friendlyIds]);
     await sql.query("DELETE FROM match_ballot WHERE match_id=ANY($1::int[])",[friendlyIds]);
+    await sql.query("DELETE FROM match_comment WHERE match_id=ANY($1::int[])",[friendlyIds]);
     await sql.query("DELETE FROM friendly_match WHERE id=ANY($1::int[])",[friendlyIds]);
   }
   // Only delete exact accounts and rows owned by this named QA fixture.
@@ -276,6 +277,21 @@ test("player administration, profile photos, friendly matches and Man of the Mat
   };
   const matchId=await makeMatch("QA Voting UI",2,1);
   const secondMatch=await makeMatch("QA Friendly 2");
+  const adminCommentResponse=await admin.post("/api/match-comments",{headers,data:{type:"create",matchId,body:"QA admin comment"}});
+  expect(adminCommentResponse.status(),await adminCommentResponse.text()).toBe(200);
+  const adminCommentId=(await adminCommentResponse.json()).commentId as number;
+  const playerCommentResponse=await player.post("/api/match-comments",{headers,data:{type:"create",matchId,body:"QA player comment"}});
+  expect(playerCommentResponse.status(),await playerCommentResponse.text()).toBe(200);
+  const playerCommentId=(await playerCommentResponse.json()).commentId as number;
+  expect((await player.post("/api/match-comments",{headers,data:{type:"update",commentId:adminCommentId,body:"Unauthorized edit"}})).status()).toBe(403);
+  expect((await admin.post("/api/match-comments",{headers,data:{type:"update",commentId:playerCommentId,body:"Admin edited this"}})).status()).toBe(200);
+  expect((await player.post("/api/match-comments",{headers,data:{type:"update",commentId:playerCommentId,body:"Player edited own comment"}})).status()).toBe(200);
+  const playerComments=await (await player.get(`/api/match-comments?matchId=${matchId}`)).json();
+  expect(playerComments.canComment).toBe(true);
+  expect(playerComments.comments.find((c:{id:number})=>c.id===playerCommentId)).toMatchObject({body:"Player edited own comment",canEdit:true});
+  expect(playerComments.comments.find((c:{id:number})=>c.id===adminCommentId).canEdit).toBe(false);
+  expect((await admin.post("/api/match-comments",{headers,data:{type:"delete",commentId:adminCommentId}})).status()).toBe(200);
+  expect((await player.post("/api/match-comments",{headers,data:{type:"delete",commentId:playerCommentId}})).status()).toBe(200);
   let matches=(await (await admin.get("/api/team")).json()).friendlyMatches;
   expect(matches.find((m:{id:number})=>m.id===matchId)).toMatchObject({homeScore:2,awayScore:1});
   expect((await admin.post("/api/team",{headers,data:{type:"friendlyMatch",matchId,opponent:"QA Voting UI",startsAt:new Date(Date.now()-86400000).toISOString(),homeScore:4,awayScore:3}})).status()).toBe(200);
