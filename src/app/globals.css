@@ -1864,10 +1864,11 @@ tr.highlight td {
 .vote-form h4 { font-family:var(--heading); font-size:21px; }
 .vote-form fieldset { border:1px solid var(--line); border-radius:6px; padding:12px; min-width:0; }
 .vote-form legend { font-weight:700; padding:0 5px; }
-.star-choices { display:flex; gap:5px; }
-.star-choices label { flex:1; }
+.star-choices { display:flex; align-items:center; gap:3px; max-width:100%; }
+.star-choices label { flex:0 1 46px; min-width:38px; }
 .star-choices input { position:absolute; opacity:0; pointer-events:none; }
-.star-choices span { display:flex; justify-content:center; gap:2px; padding:9px 4px; border:1px solid var(--line); border-radius:4px; color:var(--muted); cursor:pointer; }
+.star-choices span { display:grid; place-items:center; min-height:42px; border:1px solid transparent; border-radius:6px; color:var(--muted); cursor:pointer; }
+.star-choices label.is-filled span { color:var(--warning-ink); }
 .star-choices input:checked + span { background:var(--warning-wash); border-color:var(--warning-line); color:var(--warning-ink); }
 .star-choices input:focus-visible + span { outline:3px solid var(--blue); outline-offset:2px; }
 .motm-choice { display:flex; align-items:center; gap:8px; margin-top:10px; font-size:11px; }
@@ -1884,7 +1885,8 @@ tr.highlight td {
   .role-actions { width:100%; }
   .role-actions .button { flex:1; }
   .rating-results > div { font-size:10px; }
-  .star-choices span { font-size:9px; padding:9px 2px; }
+  .star-choices label { flex-basis:42px; }
+  .star-choices span { min-height:40px; }
   .presence-form > label { align-items:flex-start; font-size:10px; }
 }
 .leaders-panel {
