@@ -127,6 +127,11 @@ i {
   fill: var(--ink);
   stroke-width: 1.2;
 }
+.club-badge > img {
+  width: 100%;
+  height: auto;
+  border-radius: 14%;
+}
 .club-badge > span {
   position: relative;
   color: var(--lime);
@@ -1208,14 +1213,13 @@ tr.highlight td {
 .player-jersey > svg {
   height: 94px;
   width: 94px;
-  fill: #243e31;
-  color: #38523e;
 }
 .player-jersey > span {
   position: absolute;
   font-family: var(--heading);
   font-size: 30px;
-  color: var(--lime);
+  color: #ff6262;
+  font-weight: 700;
   margin-top: 2px;
 }
 .player-jersey > i {
@@ -1353,20 +1357,14 @@ tr.highlight td {
 }
 .shirt-token {
   position: relative;
-  color: #d6f285;
   display: grid;
   place-items: center;
-}
-.shirt-token > svg {
-  fill: #d6f285;
-  color: #bfdc79;
-  stroke-width: 1;
 }
 .shirt-token > b {
   position: absolute;
   font-family: var(--heading);
   font-size: 17px;
-  color: #35572d;
+  color: #ff6262;
 }
 .formation-player > select,
 .formation-player > span:last-child:not(.shirt-token) {

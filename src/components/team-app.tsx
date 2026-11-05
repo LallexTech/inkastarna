@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Activity,
@@ -80,14 +81,36 @@ function Badge({
   name?: string;
   large?: boolean;
 }) {
+  const isInkastarna = name === "Inkastarna";
   return (
     <div
-      className={`club-badge ${name === "Inkastarna" ? "ours" : "other"} ${large ? "large" : ""}`}
+      className={`club-badge ${isInkastarna ? "ours" : "other"} ${large ? "large" : ""}`}
       aria-label={name}
     >
-      <Shield aria-hidden="true" />
-      <span>{name === "Inkastarna" ? "I" : short(name)}</span>
+      {isInkastarna ? (
+        <Image src="/icons/inkastarna-192.png" alt="" width={192} height={192} unoptimized />
+      ) : (
+        <>
+          <Shield aria-hidden="true" />
+          <span>{short(name)}</span>
+        </>
+      )}
     </div>
+  );
+}
+function TeamShirt({ size = 24 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M8 3H16L22.5 6.5L21 12L17.5 11V21H6.5V11L3 12L1.5 6.5Z"
+        fill="#191919"
+        stroke="#424242"
+        strokeLinejoin="round"
+      />
+      <path d="M8.5 3L12 7L15.5 3" fill="none" stroke="#626262" />
+      <path d="M7.5 11V20.5" stroke="#e1393e" />
+      <path d="M16.5 11V20.5" stroke="#3679cf" />
+    </svg>
   );
 }
 function Empty({
@@ -1115,7 +1138,7 @@ export default function TeamApp() {
                         {(team?.players ?? []).map((p, i) => (
                           <article className="player-card" key={p.id}>
                             <div className="player-jersey">
-                              <Shirt strokeWidth={1} />
+                              <TeamShirt />
                               <span>{p.number ?? "–"}</span>
                               <i>{String(i + 1).padStart(2, "0")}</i>
                             </div>
@@ -1194,7 +1217,7 @@ export default function TeamApp() {
                                   key={label}
                                 >
                                   <span className="shirt-token">
-                                    <Shirt size={38} />
+                                    <TeamShirt size={38} />
                                     <b>
                                       {team?.players.find(
                                         (p) => p.id === slots[i],
