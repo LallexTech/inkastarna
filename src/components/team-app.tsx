@@ -666,7 +666,7 @@ export default function TeamApp() {
                 {active === "overview"
                   ? "Vår hemmaplan"
                   : tabs.find((t) => t.id === active)?.label}
-                <span className="lime-dot">.</span>
+                <span className="accent-dot">.</span>
               </h1>
               <p>
                 {active === "overview"
@@ -784,7 +784,7 @@ export default function TeamApp() {
                       </div>
                       <div className="hero-actions">
                         <button
-                          className="button lime"
+                          className="button primary"
                           onClick={() =>
                             next ? setSelected(next) : go("upcoming")
                           }
