@@ -274,11 +274,11 @@ test("player administration, profile photos, friendly matches and Man of the Mat
     const found=current.friendlyMatches.find((m:{away:string})=>m.away===opponent);
     friendlyIds.push(found.id); return found.id as number;
   };
-  const matchId=await makeMatch("QA Friendly",2,1);
+  const matchId=await makeMatch("QA Voting UI",2,1);
   const secondMatch=await makeMatch("QA Friendly 2");
   let matches=(await (await admin.get("/api/team")).json()).friendlyMatches;
   expect(matches.find((m:{id:number})=>m.id===matchId)).toMatchObject({homeScore:2,awayScore:1});
-  expect((await admin.post("/api/team",{headers,data:{type:"friendlyMatch",matchId,opponent:"QA Friendly",startsAt:new Date(Date.now()-86400000).toISOString(),homeScore:4,awayScore:3}})).status()).toBe(200);
+  expect((await admin.post("/api/team",{headers,data:{type:"friendlyMatch",matchId,opponent:"QA Voting UI",startsAt:new Date(Date.now()-86400000).toISOString(),homeScore:4,awayScore:3}})).status()).toBe(200);
   matches=(await (await admin.get("/api/team")).json()).friendlyMatches;
   expect(matches.find((m:{id:number})=>m.id===matchId)).toMatchObject({homeScore:4,awayScore:3});
   expect((await admin.post("/api/match-votes",{headers,data:{type:"open",matchId:secondMatch}})).status()).toBe(409);
@@ -290,7 +290,7 @@ test("player administration, profile photos, friendly matches and Man of the Mat
   await uiContext.addCookies((await admin.storageState()).cookies);
   const page=await uiContext.newPage();
   await page.goto("/#played");
-  await page.locator(".match-row").filter({has:page.getByText("QA Friendly",{exact:true})}).click();
+  await page.locator(".match-row").filter({hasText:"QA Voting UI"}).click();
   const starChoices=page.locator(".star-choices").first();
   await expect(starChoices.locator("label")).toHaveCount(5);
   await expect(page.getByRole("radio",{name:"3 stjärnor till QA Player"})).toBeChecked();
