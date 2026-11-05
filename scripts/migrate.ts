@@ -106,22 +106,28 @@ await db.query(`
     PRIMARY KEY(match_id,voter_user_id,player_id),
     FOREIGN KEY(match_id,voter_user_id) REFERENCES match_vote(match_id,voter_user_id) ON DELETE CASCADE
   );
-  WITH tallies AS (
+  WITH motm_votes AS (
     SELECT v.match_id,v.motm_player_id,
-      COUNT(DISTINCT v.voter_user_id)::int AS votes,
-      COALESCE(SUM(given.stars),0)::int AS stars_given
+      COUNT(DISTINCT v.voter_user_id)::int AS votes
     FROM match_vote v
     JOIN match_presence target ON target.match_id=v.match_id AND target.player_id=v.motm_player_id AND target.status='played'
     JOIN roster voter ON voter.user_id=v.voter_user_id
     JOIN match_presence vp ON vp.match_id=v.match_id AND vp.player_id=voter.id AND vp.status IN ('played','spectator')
-    LEFT JOIN match_rating given ON given.match_id=v.match_id AND given.voter_user_id=v.voter_user_id
     JOIN match_ballot b ON b.match_id=v.match_id AND b.closed_at IS NOT NULL AND b.motm_winner_id IS NULL
     WHERE v.motm_player_id IS NOT NULL
     GROUP BY v.match_id,v.motm_player_id
+  ), stars_given AS (
+    SELECT v.match_id,voter.id AS player_id,COALESCE(SUM(rating.stars),0)::int AS stars_given
+    FROM match_vote v
+    JOIN roster voter ON voter.user_id=v.voter_user_id
+    JOIN match_presence vp ON vp.match_id=v.match_id AND vp.player_id=voter.id AND vp.status IN ('played','spectator')
+    LEFT JOIN match_rating rating ON rating.match_id=v.match_id AND rating.voter_user_id=v.voter_user_id
+    JOIN match_ballot b ON b.match_id=v.match_id AND b.closed_at IS NOT NULL AND b.motm_winner_id IS NULL
+    GROUP BY v.match_id,voter.id
   ), ranked AS (
-    SELECT match_id,motm_player_id,
-      ROW_NUMBER() OVER(PARTITION BY match_id ORDER BY votes DESC,stars_given DESC,random()) AS position
-    FROM tallies
+    SELECT mv.match_id,mv.motm_player_id,
+      ROW_NUMBER() OVER(PARTITION BY mv.match_id ORDER BY mv.votes DESC,COALESCE(sg.stars_given,0) DESC,random()) AS position
+    FROM motm_votes mv LEFT JOIN stars_given sg ON sg.match_id=mv.match_id AND sg.player_id=mv.motm_player_id
   )
   UPDATE match_ballot b SET motm_winner_id=r.motm_player_id
     FROM ranked r WHERE b.match_id=r.match_id AND r.position=1 AND b.motm_winner_id IS NULL;

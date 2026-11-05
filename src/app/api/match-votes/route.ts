@@ -11,14 +11,25 @@ const bodySchema = z.discriminatedUnion("type", [
 ]);
 
 async function pickMotmWinner(matchId:number) {
-  const result=await db.query(`SELECT v.motm_player_id AS "playerId",COUNT(DISTINCT v.voter_user_id)::int AS votes,COALESCE(SUM(given.stars),0)::int AS "starsGiven"
-    FROM match_vote v
-    JOIN match_presence target ON target.match_id=v.match_id AND target.player_id=v.motm_player_id AND target.status='played'
-    JOIN roster voter ON voter.user_id=v.voter_user_id
-    JOIN match_presence vp ON vp.match_id=v.match_id AND vp.player_id=voter.id AND vp.status IN ('played','spectator')
-    LEFT JOIN match_rating given ON given.match_id=v.match_id AND given.voter_user_id=v.voter_user_id
-    WHERE v.match_id=$1 AND v.motm_player_id IS NOT NULL
-    GROUP BY v.motm_player_id`,[matchId]);
+  const result=await db.query(`WITH motm_votes AS (
+      SELECT v.motm_player_id AS "playerId",COUNT(DISTINCT v.voter_user_id)::int AS votes
+      FROM match_vote v
+      JOIN match_presence target ON target.match_id=v.match_id AND target.player_id=v.motm_player_id AND target.status='played'
+      JOIN roster voter ON voter.user_id=v.voter_user_id
+      JOIN match_presence vp ON vp.match_id=v.match_id AND vp.player_id=voter.id AND vp.status IN ('played','spectator')
+      WHERE v.match_id=$1 AND v.motm_player_id IS NOT NULL
+      GROUP BY v.motm_player_id
+    ), stars_given AS (
+      SELECT voter.id AS "playerId",COALESCE(SUM(rating.stars),0)::int AS "starsGiven"
+      FROM match_vote v
+      JOIN roster voter ON voter.user_id=v.voter_user_id
+      JOIN match_presence vp ON vp.match_id=v.match_id AND vp.player_id=voter.id AND vp.status IN ('played','spectator')
+      LEFT JOIN match_rating rating ON rating.match_id=v.match_id AND rating.voter_user_id=v.voter_user_id
+      WHERE v.match_id=$1
+      GROUP BY voter.id
+    )
+    SELECT mv."playerId",mv.votes,COALESCE(sg."starsGiven",0)::int AS "starsGiven"
+    FROM motm_votes mv LEFT JOIN stars_given sg ON sg."playerId"=mv."playerId"`,[matchId]);
   if (!result.rowCount) return null;
   const maxVotes=Math.max(...result.rows.map((row)=>Number(row.votes)));
   const voteLeaders=result.rows.filter((row)=>Number(row.votes)===maxVotes);
