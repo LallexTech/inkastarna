@@ -14,7 +14,7 @@ const teamAdmin = z.object({ type: z.literal("teamAdmin"), playerId: z.string().
 const rosterPlayer = z.object({ type: z.literal("rosterPlayer"), playerId: z.string().optional(), name: z.string().trim().min(1).max(80), number: z.number().int().min(1).max(99).nullable(), position: positions });
 const stats = z.object({ type: z.literal("stats"), matchId: z.number().int().positive(), playerId: z.string(), goals: z.number().int().min(0).max(100), assists: z.number().int().min(0).max(100), played: z.boolean() });
 const presence = z.object({ type: z.literal("presence"), matchId: z.number().int().positive(), players: z.array(z.object({ playerId: z.string().min(1), status: z.enum(["played", "spectator", "absent"]) })).max(100) });
-const friendlyMatch = z.object({ type: z.literal("friendlyMatch"), matchId: z.number().int().positive().optional(), opponent: z.string().trim().min(1).max(100), startsAt: z.string().datetime() });
+const friendlyMatch = z.object({ type: z.literal("friendlyMatch"), matchId: z.number().int().positive().optional(), opponent: z.string().trim().min(1).max(100), startsAt: z.string().datetime(), homeScore:z.number().int().min(0).max(100).nullable().optional(), awayScore:z.number().int().min(0).max(100).nullable().optional() });
 const schema = z.discriminatedUnion("type", [attendance, profile, lineup, teamLeader, teamAdmin, rosterPlayer, stats, presence, friendlyMatch]);
 
 export async function GET(request: Request) {
@@ -28,7 +28,7 @@ export async function GET(request: Request) {
     db.query('SELECT match_id AS "matchId", slots, formation FROM lineup'),
     db.query("SELECT r.id FROM team_leader tl JOIN roster r ON r.user_id=tl.user_id"),
     db.query("SELECT r.id FROM team_admin ta JOIN roster r ON r.user_id=ta.user_id"),
-    db.query("SELECT id,opponent,starts_at AS \"startsAt\" FROM friendly_match ORDER BY starts_at DESC"),
+    db.query("SELECT id,opponent,starts_at AS \"startsAt\",home_score AS \"homeScore\",away_score AS \"awayScore\" FROM friendly_match ORDER BY starts_at DESC"),
     db.query('SELECT match_id AS "matchId",player_id AS "playerId",status FROM match_presence'),
     db.query('SELECT match_id AS "matchId",closed_at IS NULL AS open,closed_at IS NOT NULL AS closed FROM match_ballot'),
     db.query(`SELECT mr.match_id AS "matchId",mr.player_id AS "playerId",AVG(mr.stars)::float AS average,COUNT(*)::int AS count FROM match_rating mr JOIN match_presence target ON target.match_id=mr.match_id AND target.player_id=mr.player_id AND target.status='played' JOIN match_vote v ON v.match_id=mr.match_id AND v.voter_user_id=mr.voter_user_id JOIN roster voter ON voter.user_id=v.voter_user_id JOIN match_presence vp ON vp.match_id=v.match_id AND vp.player_id=voter.id AND vp.status IN ('played','spectator') GROUP BY mr.match_id,mr.player_id`),
@@ -55,7 +55,7 @@ export async function GET(request: Request) {
     const max=rows.reduce((n,m)=>Math.max(n,Number(m.count)),0);
     for (const m of rows.filter((x)=>Number(x.count)===max)) { const v=seasonRatings.get(m.playerId) ?? {total:0,count:0,matches:new Set<number>(),motm:0}; v.motm++; seasonRatings.set(m.playerId,v); }
   }
-  const friendlyMatches = friendlies.rows.map((m) => ({ id:m.id, startsAt:new Date(m.startsAt).toISOString(), location:"Träningsmatch", finished:true, home:"Inkastarna", away:m.opponent, homeId:27757, awayId:0, homeScore:null, awayScore:null, friendly:true }));
+  const friendlyMatches = friendlies.rows.map((m) => ({ id:m.id, startsAt:new Date(m.startsAt).toISOString(), location:"Träningsmatch", finished:true, home:"Inkastarna", away:m.opponent, homeId:27757, awayId:0, homeScore:m.homeScore===null?null:Number(m.homeScore), awayScore:m.awayScore===null?null:Number(m.awayScore), friendly:true }));
   return Response.json({
     players: players.rows.map(({ user_id, email, hasPhoto, ...p }) => ({ ...p, rootAdmin:isAdmin(email ?? ""), admin:Boolean(p.admin || isAdmin(email ?? "")), photoUrl:hasPhoto ? `/api/player-photo?id=${encodeURIComponent(p.id)}` : null })),
     attendance:responses.rows, lineups:lineups.rows, teamLeads:teamLeads.rows.map((r)=>r.id), teamAdmins:teamAdmins.rows.map((r)=>r.id), admin, leader,
@@ -109,10 +109,11 @@ export async function POST(request: Request) {
   } else if (data.type === "friendlyMatch") {
     if (!leader) return Response.json({error:"Bara lagledare kan hantera träningsmatcher."},{status:403});
     if (new Date(data.startsAt).getTime()>Date.now()) return Response.json({error:"Registrera träningsmatchen efter att den är färdigspelad."},{status:400});
+    if (((data.homeScore??null)===null) !== ((data.awayScore??null)===null)) return Response.json({error:"Fyll i målen för båda lagen, eller lämna båda tomma."},{status:400});
     if (data.matchId) {
-      const updated=await db.query("UPDATE friendly_match SET opponent=$2,starts_at=$3 WHERE id=$1",[data.matchId,data.opponent,new Date(data.startsAt)]);
+      const updated=await db.query("UPDATE friendly_match SET opponent=$2,starts_at=$3,home_score=$4,away_score=$5 WHERE id=$1",[data.matchId,data.opponent,new Date(data.startsAt),data.homeScore??null,data.awayScore??null]);
       if (!updated.rowCount) return Response.json({error:"Träningsmatchen finns inte."},{status:404});
-    } else await db.query("INSERT INTO friendly_match(opponent,starts_at,created_by) VALUES($1,$2,$3)",[data.opponent,new Date(data.startsAt),session.user.id]);
+    } else await db.query("INSERT INTO friendly_match(opponent,starts_at,created_by,home_score,away_score) VALUES($1,$2,$3,$4,$5)",[data.opponent,new Date(data.startsAt),session.user.id,data.homeScore??null,data.awayScore??null]);
   } else if (data.type === "presence") {
     if (!leader) return Response.json({error:"Bara lagledare kan ändra närvaro."},{status:403});
     const {league}=await readLeague();
