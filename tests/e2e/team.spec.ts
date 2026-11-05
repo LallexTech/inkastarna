@@ -166,6 +166,7 @@ test("team-code access, session, RSVP persistence and admin lineup", async ({
     type: "lineup",
     matchId: match.id,
     slots: ["qa-admin", "qa-player", null, null, null],
+    formation: "2-2",
   };
   const forbidden = await page.request.post("/api/team", {
     data: lineupData,
@@ -200,5 +201,28 @@ test("team-code access, session, RSVP persistence and admin lineup", async ({
     adminData.lineups.find((x: { matchId: number }) => x.matchId === match.id)
       .slots,
   ).toEqual(lineupData.slots);
+  expect(
+    adminData.lineups.find((x: { matchId: number }) => x.matchId === match.id)
+      .formation,
+  ).toBe("2-2");
+  const promoted = await admin.post("/api/team", {
+    data: { type: "teamLeader", playerId: "qa-player", enabled: true },
+    headers: { origin: "http://localhost:3100" },
+  });
+  expect(promoted.status(), await promoted.text()).toBe(200);
+  const promotedData = await (await page.request.get("/api/team")).json();
+  expect(promotedData.admin).toBe(true);
+  const leaderLineup = await page.request.post("/api/team", {
+    data: { ...lineupData, formation: "1-2-1" },
+    headers: { origin: "http://localhost:3100" },
+  });
+  expect(leaderLineup.status()).toBe(200);
+  const demoted = await admin.post("/api/team", {
+    data: { type: "teamLeader", playerId: "qa-player", enabled: false },
+    headers: { origin: "http://localhost:3100" },
+  });
+  expect(demoted.status()).toBe(200);
+  const demotedData = await (await page.request.get("/api/team")).json();
+  expect(demotedData.admin).toBe(false);
   await admin.dispose();
 });

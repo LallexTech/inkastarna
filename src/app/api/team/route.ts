@@ -1,4 +1,4 @@
-import { auth, isAdmin, appOrigins } from "@/lib/auth";
+import { auth, isAdmin, isTeamLeader, appOrigins } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { readLeague } from "@/lib/league-store";
 import { z } from "zod";
@@ -17,6 +17,12 @@ const lineup = z.object({
   type: z.literal("lineup"),
   matchId: z.number().int().positive(),
   slots: z.array(z.string().nullable()).length(5),
+  formation: z.enum(["1-2-1", "2-2"]).default("1-2-1"),
+});
+const teamLeader = z.object({
+  type: z.literal("teamLeader"),
+  playerId: z.string().min(1),
+  enabled: z.boolean(),
 });
 const stats = z.object({
   type: z.literal("stats"),
@@ -30,6 +36,7 @@ const schema = z.discriminatedUnion("type", [
   attendance,
   profile,
   lineup,
+  teamLeader,
   stats,
 ]);
 
@@ -40,26 +47,31 @@ export async function GET(request: Request) {
       { error: "Logga in för att se laget." },
       { status: 401 },
     );
-  const [players, responses, lineups] = await Promise.all([
+  const [players, responses, lineups, teamLeads] = await Promise.all([
     db.query(
-      "SELECT r.id, r.name, p.number, COALESCE(p.position, $1) AS position, COALESCE(s.goals,0)::int AS goals, COALESCE(s.assists,0)::int AS assists, COALESCE(s.appearances,0)::int AS appearances FROM roster r LEFT JOIN player_profile p ON p.user_id=r.user_id LEFT JOIN (SELECT player_id, SUM(goals) AS goals, SUM(assists) AS assists, COUNT(*) FILTER (WHERE played) AS appearances FROM player_stats GROUP BY player_id) s ON s.player_id=r.id ORDER BY r.name",
+      'SELECT r.id, r.name, r.user_id IS NOT NULL AS "hasAccount", p.number, COALESCE(p.position, $1) AS position, COALESCE(s.goals,0)::int AS goals, COALESCE(s.assists,0)::int AS assists, COALESCE(s.appearances,0)::int AS appearances FROM roster r LEFT JOIN player_profile p ON p.user_id=r.user_id LEFT JOIN (SELECT player_id, SUM(goals) AS goals, SUM(assists) AS assists, COUNT(*) FILTER (WHERE played) AS appearances FROM player_stats GROUP BY player_id) s ON s.player_id=r.id ORDER BY r.name',
       ["Allround"],
     ),
     db.query(
       'SELECT a.match_id AS "matchId", a.user_id AS "userId", u.name, a.status FROM attendance a JOIN "user" u ON u.id=a.user_id',
     ),
-    db.query('SELECT match_id AS "matchId", slots FROM lineup'),
+    db.query('SELECT match_id AS "matchId", slots, formation FROM lineup'),
+    db.query(
+      "SELECT r.id FROM team_leader tl JOIN roster r ON r.user_id=tl.user_id",
+    ),
   ]);
   const player = await db.query("SELECT id FROM roster WHERE user_id=$1", [
     session.user.id,
   ]);
+  const admin = await isTeamLeader(session.user.id, session.user.email);
   return Response.json(
     {
       players: players.rows,
       attendance: responses.rows,
       lineups: lineups.rows,
-      admin: isAdmin(session.user.email),
-      ...(isAdmin(session.user.email)
+      teamLeads: teamLeads.rows.map((row) => row.id),
+      admin,
+      ...(admin
         ? { inviteCode: process.env.TEAM_JOIN_CODE }
         : {}),
       userId: session.user.id,
@@ -89,6 +101,38 @@ export async function POST(request: Request) {
       [session.user.id, data.number, data.position],
     );
   } else {
+    if (data.type === "teamLeader") {
+      if (!(await isTeamLeader(session.user.id, session.user.email)))
+        return Response.json(
+          { error: "Bara lagledare kan ändra lagledarbehörighet." },
+          { status: 403 },
+        );
+      const player = await db.query("SELECT user_id FROM roster WHERE id=$1", [
+        data.playerId,
+      ]);
+      if (!player.rows[0]?.user_id)
+        return Response.json(
+          { error: "Spelaren behöver ha ett konto innan hen kan bli lagledare." },
+          { status: 409 },
+        );
+      if (data.enabled)
+        await db.query(
+          "INSERT INTO team_leader(user_id,assigned_by) VALUES($1,$2) ON CONFLICT(user_id) DO NOTHING",
+          [player.rows[0].user_id, session.user.id],
+        );
+      else {
+        const leaders = await db.query("SELECT count(*)::int AS count FROM team_leader");
+        if (Number(leaders.rows[0].count) <= 1 && !isAdmin(session.user.email))
+          return Response.json(
+            { error: "Minst en lagledare måste finnas kvar." },
+            { status: 409 },
+          );
+        await db.query("DELETE FROM team_leader WHERE user_id=$1", [
+          player.rows[0].user_id,
+        ]);
+      }
+      return Response.json({ ok: true });
+    }
     const { league } = await readLeague();
     const match = league?.matches.find(
       (m) =>
@@ -101,7 +145,7 @@ export async function POST(request: Request) {
         { status: 404 },
       );
     if (data.type === "stats") {
-      if (!isAdmin(session.user.email))
+      if (!(await isTeamLeader(session.user.id, session.user.email)))
         return Response.json(
           { error: "Bara lagledaren kan registrera statistik." },
           { status: 403 },
@@ -139,7 +183,7 @@ export async function POST(request: Request) {
         [data.matchId, session.user.id, data.status],
       );
     } else {
-      if (!isAdmin(session.user.email))
+      if (!(await isTeamLeader(session.user.id, session.user.email)))
         return Response.json(
           { error: "Bara lagledaren kan spara laguppställningen." },
           { status: 403 },
@@ -162,8 +206,8 @@ export async function POST(request: Request) {
           );
       }
       await db.query(
-        "INSERT INTO lineup(match_id,slots,updated_by) VALUES($1,$2,$3) ON CONFLICT(match_id) DO UPDATE SET slots=$2,updated_by=$3,updated_at=now()",
-        [data.matchId, JSON.stringify(data.slots), session.user.id],
+        "INSERT INTO lineup(match_id,slots,formation,updated_by) VALUES($1,$2,$3,$4) ON CONFLICT(match_id) DO UPDATE SET slots=$2,formation=$3,updated_by=$4,updated_at=now()",
+        [data.matchId, JSON.stringify(data.slots), data.formation, session.user.id],
       );
     }
   }

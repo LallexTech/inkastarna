@@ -96,3 +96,11 @@ export function isAdmin(email: string) {
     .map((x) => x.trim().toLowerCase())
     .includes(email.toLowerCase());
 }
+
+export async function isTeamLeader(userId: string, email: string) {
+  if (isAdmin(email)) return true;
+  const result = await db.query("SELECT 1 FROM team_leader WHERE user_id=$1", [
+    userId,
+  ]);
+  return Boolean(result.rowCount);
+}

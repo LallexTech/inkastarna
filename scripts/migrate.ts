@@ -18,8 +18,14 @@ await db.query(`
     PRIMARY KEY(match_id,user_id)
   );
   CREATE TABLE IF NOT EXISTS lineup (
-    match_id integer PRIMARY KEY, slots jsonb NOT NULL, updated_by text NOT NULL REFERENCES "user"(id),
+    match_id integer PRIMARY KEY, slots jsonb NOT NULL, formation text NOT NULL DEFAULT '1-2-1', updated_by text NOT NULL REFERENCES "user"(id),
     updated_at timestamptz NOT NULL DEFAULT now(), CHECK(jsonb_array_length(slots)=5)
+  );
+  ALTER TABLE lineup ADD COLUMN IF NOT EXISTS formation text NOT NULL DEFAULT '1-2-1';
+  CREATE TABLE IF NOT EXISTS team_leader (
+    user_id text PRIMARY KEY REFERENCES "user"(id) ON DELETE CASCADE,
+    assigned_by text NOT NULL REFERENCES "user"(id),
+    assigned_at timestamptz NOT NULL DEFAULT now()
   );
   CREATE TABLE IF NOT EXISTS player_match_stats (
     match_id integer NOT NULL, user_id text NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
