@@ -1,0 +1,8 @@
+.local/**
+.codex-remote-attachments/**
+.netlify/**
+AGENTS.md
+tests/**
+test-results/**
+playwright-report/**
+tsconfig.tsbuildinfo

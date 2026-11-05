@@ -10,6 +10,7 @@ export type Match = {
   homeScore: number | null;
   awayScore: number | null;
   friendly?: boolean;
+  includeInStats?: boolean;
 };
 export type Standing = {
   position: number;
