@@ -3,6 +3,10 @@ import type { League, Match, Standing } from "./types";
 const origin = "https://korpenstockholm.zoezi.se";
 export const TEAM_ID = 27757;
 export const DIVISION_ID = 9266;
+export const ARCHIVE_SEASONS = [
+  { divisionId: 7862, season: "2025/26" },
+  { divisionId: 6323, season: "2024/25" },
+] as const;
 type RawMatch = {
   id: number;
   startTime: string;
@@ -78,11 +82,14 @@ async function get(path: string) {
   return response.json();
 }
 
-export async function fetchLeague(): Promise<League> {
+export async function fetchLeague(
+  divisionId = DIVISION_ID,
+  season = divisionId === DIVISION_ID ? "2026 / 2027" : undefined,
+): Promise<League> {
   const [matches, table] = await Promise.all([
-    get(`/api/teamsport/division/matches/get?id=${DIVISION_ID}`),
+    get(`/api/teamsport/division/matches/get?id=${divisionId}`),
     get(
-      `/api/memberapi/teamsport/result/for_division?division_id=${DIVISION_ID}`,
+      `/api/memberapi/teamsport/result/for_division?division_id=${divisionId}`,
     ),
   ]);
   if (
@@ -124,7 +131,7 @@ export async function fetchLeague(): Promise<League> {
     scorersAvailable = false;
   try {
     const top = await get(
-      `/api/memberapi/teamsport/toplist/for_division?division_id=${DIVISION_ID}&toplist_id=3`,
+      `/api/memberapi/teamsport/toplist/for_division?division_id=${divisionId}&toplist_id=3`,
     );
     const list = top.toplists?.find(
       (x: { toplist: { id: number } }) => x.toplist.id === 3,
@@ -139,9 +146,13 @@ export async function fetchLeague(): Promise<League> {
   }
   return {
     name: "Herr Söndag Norr · Division 2",
-    season: "2026 / 2027",
-    divisionId: DIVISION_ID,
-    teamId: TEAM_ID,
+    season: season ?? inferSeason(matches),
+    divisionId,
+    teamId:
+      matches
+        .flatMap((match: RawMatch) => match.competitors)
+        .find((competitor: RawMatch["competitors"][number]) => competitor.name.trim() === "Inkastarna")
+        ?.team_id ?? TEAM_ID,
     fetchedAt: new Date().toISOString(),
     matches: matches
       .map(normalizeMatch)
@@ -150,4 +161,12 @@ export async function fetchLeague(): Promise<League> {
     scorers,
     scorersAvailable,
   };
+}
+
+function inferSeason(matches: RawMatch[]): string {
+  const firstDate = matches
+    .map((match) => Number(match.startTime.slice(0, 4)))
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b)[0];
+  return firstDate ? `${firstDate} / ${firstDate + 1}` : "Tidigare säsong";
 }

@@ -69,6 +69,14 @@ await db.query(`
     created_at timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY(id)
   );
+  ALTER TABLE friendly_match ADD COLUMN IF NOT EXISTS home_score integer;
+  ALTER TABLE friendly_match ADD COLUMN IF NOT EXISTS away_score integer;
+  DO $$ BEGIN
+    ALTER TABLE friendly_match ADD CONSTRAINT friendly_match_home_score_check CHECK(home_score BETWEEN 0 AND 100);
+  EXCEPTION WHEN duplicate_object THEN NULL; END; $$;
+  DO $$ BEGIN
+    ALTER TABLE friendly_match ADD CONSTRAINT friendly_match_away_score_check CHECK(away_score BETWEEN 0 AND 100);
+  EXCEPTION WHEN duplicate_object THEN NULL; END; $$;
   CREATE TABLE IF NOT EXISTS match_presence (
     match_id integer NOT NULL,
     player_id text NOT NULL REFERENCES roster(id) ON DELETE CASCADE,
