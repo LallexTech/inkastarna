@@ -1,6 +1,7 @@
 import { auth, appOrigins, isTeamLeader } from "@/lib/auth";
 import { db } from "@/lib/db";
 import type { League } from "@/lib/types";
+import { summarizeStarRatings } from "@/lib/star-ratings";
 import { z } from "zod";
 
 const bodySchema = z.discriminatedUnion("type", [
@@ -67,7 +68,7 @@ export async function GET(request:Request) {
     db.query('SELECT closed_at AS "closedAt" FROM match_ballot WHERE match_id=$1',[matchId]),
     db.query('SELECT mp.player_id AS "playerId",r.display_name AS name,mp.status,r.user_id AS "userId" FROM match_presence mp JOIN roster r ON r.id=mp.player_id WHERE mp.match_id=$1 ORDER BY name',[matchId]),
     db.query('SELECT r.id AS "playerId",r.display_name AS name, (r.user_id=$2) AS self FROM match_presence mp JOIN roster r ON r.id=mp.player_id WHERE mp.match_id=$1 AND mp.status=\'played\' ORDER BY name',[matchId,session.user.id]),
-    db.query(`SELECT mr.player_id AS "playerId",AVG(mr.stars)::float AS average,COUNT(*)::int AS count FROM match_rating mr JOIN match_presence target ON target.match_id=mr.match_id AND target.player_id=mr.player_id AND target.status='played' JOIN roster voter ON voter.user_id=mr.voter_user_id JOIN match_presence vp ON vp.match_id=mr.match_id AND vp.player_id=voter.id AND vp.status IN ('played','spectator') WHERE mr.match_id=$1 GROUP BY mr.player_id`,[matchId]),
+    db.query(`SELECT mr.player_id AS "playerId",ARRAY_AGG(mr.stars)::int[] AS stars FROM match_rating mr JOIN match_presence target ON target.match_id=mr.match_id AND target.player_id=mr.player_id AND target.status='played' JOIN roster voter ON voter.user_id=mr.voter_user_id JOIN match_presence vp ON vp.match_id=mr.match_id AND vp.player_id=voter.id AND vp.status IN ('played','spectator') WHERE mr.match_id=$1 GROUP BY mr.player_id`,[matchId]),
     db.query(`SELECT v.motm_player_id AS "playerId",COUNT(*)::int AS count,BOOL_AND(b.closed_at IS NOT NULL) AS closed FROM match_vote v JOIN match_ballot b ON b.match_id=v.match_id JOIN roster voter ON voter.user_id=v.voter_user_id JOIN match_presence vp ON vp.match_id=v.match_id AND vp.player_id=voter.id AND vp.status IN ('played','spectator') JOIN match_presence target ON target.match_id=v.match_id AND target.player_id=v.motm_player_id AND target.status='played' WHERE v.match_id=$1 AND v.motm_player_id IS NOT NULL GROUP BY v.motm_player_id`,[matchId]),
     db.query("SELECT id FROM roster WHERE user_id=$1",[session.user.id]),
     db.query("SELECT motm_player_id AS \"motmPlayerId\" FROM match_vote WHERE match_id=$1 AND voter_user_id=$2",[matchId,session.user.id]),
@@ -77,7 +78,7 @@ export async function GET(request:Request) {
   const eligible=Boolean(myRoster.rows[0] && presence.rows.some((p)=>p.userId===session.user.id && ["played","spectator"].includes(p.status)));
   const closed=Boolean(ballot.rows[0]?.closedAt);
   const winnerId=await getMotmWinner(matchId,closed);
-  return Response.json({open:isOpen,closed,eligible,players:candidates.rows,presence:presence.rows.map(({userId,...p})=>p),ratings:ratings.rows.map(({count,...r})=>({...r,average:Math.max(3,Number(r.average))})),winnerId,ownBallot:myVote.rows[0]??null,ownRatings:myRatings.rows},{headers:{"Cache-Control":"private, no-store"}});
+  return Response.json({open:isOpen,closed,eligible,players:candidates.rows,presence:presence.rows.map(({userId,...p})=>p),ratings:ratings.rows.map(({stars,...r})=>({...r,average:Math.max(3,summarizeStarRatings(stars).average ?? 3)})),winnerId,ownBallot:myVote.rows[0]??null,ownRatings:myRatings.rows},{headers:{"Cache-Control":"private, no-store"}});
 }
 
 export async function POST(request:Request) {
