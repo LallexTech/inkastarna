@@ -51,6 +51,7 @@ export type Player = {
 export type Attendance = {
   matchId: number;
   userId: string;
+  playerId?: string | null;
   name: string;
   status: "yes" | "maybe" | "no";
 };

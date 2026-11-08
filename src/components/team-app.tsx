@@ -15,6 +15,7 @@ import {
   Copy,
   ExternalLink,
   Flag,
+  Gamepad2,
   Home,
   LayoutDashboard,
   ListOrdered,
@@ -24,6 +25,7 @@ import {
   MapPin,
   Menu,
   RefreshCw,
+  Shuffle,
   Shield,
   Shirt,
   Smartphone,
@@ -37,7 +39,9 @@ import {
 } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { calendarEvent } from "@/lib/calendar";
+import { randomLineup } from "@/lib/lineup";
 import type { Formation, League, Match, Standing, TeamData } from "@/lib/types";
+import FootballArena from "@/components/football-arena";
 
 type Tab =
   | "overview"
@@ -47,6 +51,7 @@ type Tab =
   | "scorers"
   | "table"
   | "lineup"
+  | "game"
   | "squad";
 const tabs = [
   { id: "overview", label: "Översikt", icon: LayoutDashboard },
@@ -56,6 +61,7 @@ const tabs = [
   { id: "scorers", label: "Skytteliga", icon: Target },
   { id: "table", label: "Tabell", icon: ListOrdered },
   { id: "lineup", label: "Laguppställning", icon: Shirt },
+  { id: "game", label: "Fotbollsarenan", icon: Gamepad2 },
   { id: "squad", label: "Truppen", icon: Users },
 ] as const;
 const date = (value: string, options: Intl.DateTimeFormatOptions) =>
@@ -208,6 +214,7 @@ export default function TeamApp() {
     [slots, setSlots] = useState<(string | null)[]>(Array(5).fill(null)),
     [formation, setFormation] = useState<Formation>("1-2-1"),
     [lineupDirty, setLineupDirty] = useState(false);
+  const [randomNotice, setRandomNotice] = useState("");
   const [installPlatform, setInstallPlatform] = useState<"ios" | "android" | "desktop">("desktop");
   const [deferredInstall, setDeferredInstall] = useState<
     | (Event & {
@@ -392,6 +399,11 @@ export default function TeamApp() {
   const statisticsPlayed = statisticsStanding?.played ?? statisticsResults.length;
   const displayUserName=team?.players.find((p)=>p.id===team.playerId)?.name??session?.user.name??"";
   const currentMatch = upcoming.find((m) => m.id === lineupMatch) ?? next;
+  const availablePlayerIds = new Set(
+    (team?.attendance ?? [])
+      .filter((response) => response.matchId === currentMatch?.id && response.status === "yes" && response.playerId)
+      .map((response) => response.playerId as string),
+  );
   useEffect(() => {
     if (!currentMatch) return;
     setSlots(
@@ -403,6 +415,7 @@ export default function TeamApp() {
         "1-2-1",
     );
     setLineupDirty(false);
+    setRandomNotice("");
   }, [currentMatch?.id, team]);
 
   async function save(data: Record<string, unknown>) {
@@ -778,6 +791,8 @@ export default function TeamApp() {
                       ? "Samma serie. Samma mål. Följ vägen genom säsongen."
                       : active === "lineup"
                         ? "Fem på planen. Ett lag bakom."
+                        : active === "game"
+                          ? "Samla laget och kliv in i en digital match."
                         : active === "squad"
                           ? "Människorna som gör Inkastarna."
                           : "Säsongen, match för match."}
@@ -1418,6 +1433,31 @@ export default function TeamApp() {
                                 </>
                               )}
                             </div>
+                            {team?.leader && (
+                              <div className="lineup-tools">
+                                <button
+                                  className="button subtle"
+                                  disabled={busy || availablePlayerIds.size === 0}
+                                  onClick={() => {
+                                    const result = randomLineup(team.players, availablePlayerIds);
+                                    setSlots(result);
+                                    setLineupDirty(true);
+                                    const placed = result.filter(Boolean).length;
+                                    const outfieldCount = team.players.filter((player) => availablePlayerIds.has(player.id) && player.position !== "Målvakt").length;
+                                    const missing: string[] = [];
+                                    if (!team.players.some((player) => availablePlayerIds.has(player.id) && player.position === "Målvakt")) missing.push("en tillgänglig målvakt");
+                                    if (outfieldCount < 4) missing.push(`${4 - outfieldCount} utespelare till`);
+                                    setRandomNotice(placed === 5
+                                      ? "Fem tillgängliga spelare slumpades in. Granska och spara laget."
+                                      : `${placed} av 5 platser fylldes. Saknar ${missing.join(" och ")}.`);
+                                  }}
+                                >
+                                  <Shuffle size={15} /> Slumpa startfemma
+                                </button>
+                                <span>{availablePlayerIds.size} spelare har svarat Kommer</span>
+                              </div>
+                            )}
+                            {randomNotice && <p className="lineup-random-note" role="status">{randomNotice}</p>}
                             <div className={`formation ${formation === "2-2" ? "two-two" : ""}`}>
                               <div className="field-lines">
                                 <div />
@@ -1460,8 +1500,9 @@ export default function TeamApp() {
                                           key={p.id}
                                           value={p.id}
                                           disabled={
-                                            slots.includes(p.id) &&
-                                            slots[i] !== p.id
+                                            (slots.includes(p.id) && slots[i] !== p.id) ||
+                                            !availablePlayerIds.has(p.id) ||
+                                            (i === 4 ? p.position !== "Målvakt" : p.position === "Målvakt")
                                           }
                                         >
                                           {p.name}
@@ -1525,11 +1566,11 @@ export default function TeamApp() {
                         </div>
                         {currentMatch && (
                           <div className="attendance-list">
-                            {(team?.players ?? []).map(({ name }) => {
+                            {(team?.players ?? []).map(({ id, name }) => {
                               const a = team?.attendance.find(
                                 (a) =>
                                   a.matchId === currentMatch.id &&
-                                  a.name.toLowerCase() === name.toLowerCase(),
+                                  a.playerId === id,
                               );
                               return (
                                 <div key={name}>
@@ -1554,6 +1595,9 @@ export default function TeamApp() {
                     </div>
                   )}
                 </>
+              )}
+              {active === "game" && (
+                !session ? authGate() : <FootballArena playerId={team?.playerId ?? null} />
               )}
             </>
           )}

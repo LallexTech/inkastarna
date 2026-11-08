@@ -111,6 +111,7 @@ test("team-code access, session, RSVP persistence and admin lineup", async ({
 }) => {
   const anon = await request.get("/api/team");
   expect(anon.status()).toBe(401);
+  expect((await request.post("/api/game-ticket", { data: { roomId: "ABC234" }, headers: { origin: "http://localhost:3100" } })).status()).toBe(401);
   const denied = await request.post("/api/auth/sign-up/email", {
     data: { name: "QA Player", email: testPlayers[1].email, password },
     headers: { "x-team-code": "wrong", origin: "http://localhost:3100" },
@@ -152,6 +153,10 @@ test("team-code access, session, RSVP persistence and admin lineup", async ({
   await expect(
     page.getByRole("button", { name: "QP QA Player", exact: true }),
   ).toBeVisible();
+  expect((await page.request.post("/api/game-ticket", {
+    data: { roomId: "bad" },
+    headers: { origin: "http://localhost:3100" },
+  })).status()).toBe(400);
   await page
     .getByRole("button", { name: "Svara på kallelsen", exact: true })
     .click();
@@ -167,6 +172,7 @@ test("team-code access, session, RSVP persistence and admin lineup", async ({
         a.name === "QA Player" && a.status === "yes",
     ),
   ).toBe(true);
+  expect(memberData.attendance.find((a: { name: string }) => a.name === "QA Player").playerId).toBe("qa-player");
   const league = (await (await request.get("/api/league")).json()).league;
   const match = league.matches.find(
     (m: { homeId: number; awayId: number; finished: boolean }) =>
@@ -200,6 +206,10 @@ test("team-code access, session, RSVP persistence and admin lineup", async ({
     headers: { origin: "http://localhost:3100" },
   });
   expect(duplicate.status()).toBe(400);
+  expect((await admin.post("/api/team", {
+    data: { type: "attendance", matchId: match.id, status: "yes" },
+    headers: { origin: "http://localhost:3100" },
+  })).status()).toBe(200);
   const saved = await admin.post("/api/team", {
     data: lineupData,
     headers: { origin: "http://localhost:3100" },
@@ -215,6 +225,24 @@ test("team-code access, session, RSVP persistence and admin lineup", async ({
     adminData.lineups.find((x: { matchId: number }) => x.matchId === match.id)
       .formation,
   ).toBe("2-2");
+  const unavailable = await admin.post("/api/team", {
+    data: { ...lineupData, slots: ["qa-admin", "qa-spectator", null, null, null] },
+    headers: { origin: "http://localhost:3100" },
+  });
+  expect(unavailable.status()).toBe(400);
+  expect((await admin.post("/api/team", {
+    data: { type: "profile", number: null, position: "Målvakt" },
+    headers: { origin: "http://localhost:3100" },
+  })).status()).toBe(200);
+  const goalkeeperOutfield = await admin.post("/api/team", {
+    data: { ...lineupData, slots: ["qa-admin", "qa-player", null, null, null] },
+    headers: { origin: "http://localhost:3100" },
+  });
+  expect(goalkeeperOutfield.status()).toBe(400);
+  expect((await admin.post("/api/team", {
+    data: { type: "profile", number: null, position: "Allround" },
+    headers: { origin: "http://localhost:3100" },
+  })).status()).toBe(200);
   const promoted = await admin.post("/api/team", {
     data: { type: "teamLeader", playerId: "qa-player", enabled: true },
     headers: { origin: "http://localhost:3100" },
