@@ -14,7 +14,9 @@
     "test": "tsx --test tests/*.test.ts",
     "test:e2e": "node --env-file-if-exists=.env.local node_modules/@playwright/test/cli.js test",
     "db:migrate": "node --env-file-if-exists=.env.local --import tsx scripts/migrate.ts",
-    "sync": "node --env-file-if-exists=.env.local --import tsx scripts/sync.ts"
+    "sync": "node --env-file-if-exists=.env.local --import tsx scripts/sync.ts",
+    "game:dev": "wrangler dev --config realtime/wrangler.toml",
+    "game:deploy": "wrangler deploy --config realtime/wrangler.toml"
   },
   "dependencies": {
     "better-auth": "latest",
@@ -33,6 +35,7 @@
     "@types/react": "latest",
     "@types/react-dom": "latest",
     "tsx": "latest",
-    "typescript": "latest"
+    "typescript": "latest",
+    "wrangler": "^4.158.0"
   }
 }

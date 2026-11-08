@@ -9,7 +9,9 @@ Lagappen för Inkastarna. Innefotboll, 2 × 15 minuter, Stora Mossen. Next.js, R
 
 ## Funktioner
 
-Översikt, kommande och spelade matcher, statistik med säsongsväljare för tidigare år, intern skytteliga, officiell tabell, trupp och en sparbar femmannauppställning i 1–2–1 eller 2–2. Spelarna kan registrera sig med lagkod, logga in, ange tröjnummer/position och svara kommer/kanske/kan inte på kommande matcher. Lagledaren sparar laguppställning och registrerar mål, assist och deltagande för färdigspelade matcher från matchens detaljvy. I Truppen kan lagledare utse fler lagledare bland spelare som har konto.
+Översikt, kommande och spelade matcher, statistik med säsongsväljare för tidigare år, intern skytteliga, officiell tabell, trupp och en sparbar femmannauppställning i 1–2–1 eller 2–2. Lagledare kan slumpa en startfemma bland spelare som svarat Kommer; målvakter placeras endast i mål. Spelarna kan registrera sig med lagkod, logga in, ange tröjnummer/position och svara kommer/kanske/kan inte på kommande matcher. Lagledaren sparar laguppställning och registrerar mål, assist och deltagande för färdigspelade matcher från matchens detaljvy. I Truppen kan lagledare utse fler lagledare bland spelare som har konto.
+
+Fliken Fotbollsarenan har ett 2D-fotbollsspel för lagets inloggade spelare. Skapa ett rum och dela länken; 2–10 spelare balanseras automatiskt i lag. Matchen kör fem minuter med tangentbord eller pekskärmskontroller. Spelrum körs separat från webbappen i en Cloudflare Worker och Durable Object. Matchresultat sparas inte i lagstatistiken.
 
 PWA med manifest, Android-ikoner, maskbar ikon, Apple-ikon, plattformsanpassad installationsguide och en offlinesida. Android kan visa webbläsarens installationsruta; iOS kräver att användaren själv väljer Dela → Lägg till på hemskärmen i Safari. Spelaruppgifter och autentiserade API-svar sparas inte i service worker-cachen. Internet krävs för aktuell data och kallelsesvar.
 
@@ -35,9 +37,22 @@ npm run sync
 npm run dev
 ```
 
+Spelets Worker körs separat i lokal utveckling. Sätt `GAME_TICKET_SECRET` till samma slumpmässiga värde i `.env.local` och `realtime/.dev.vars`, och sätt `NEXT_PUBLIC_GAME_WS_URL=ws://127.0.0.1:8787` lokalt. Starta därefter `npm run game:dev` i en annan terminal.
+
 `INITIAL_ROSTER` innehåller kommaseparerade förnamn och läses endast av migreringen. Befintliga spelare ersätts inte när migreringen körs igen. Auth-tabeller migreras med Better Auths egen migrerare. Appens schemaändringar ska vara additiva och bakåtkompatibla.
 
 Miljövariabler sätts i Netlify, med separata värden för `production` respektive `branch-deploy` och `deploy-preview`. Behåll lokala utvecklingsvärden i `.env.local`. Inga `.env`-filer, API-token eller registreringskoder får committas. Netlifys Free-plan använder vanliga servervariabler; de är läsbara för projektadministratören men skickas aldrig till webbläsaren. Ingen `NEXT_PUBLIC_`-variabel får innehålla en hemlighet.
+
+## Fotbollsarenans realtidstjänst
+
+Installera Wrangler och kör `npx wrangler login` med Cloudflare-kontot. Sätt en stark `GAME_TICKET_SECRET` med samma värde i Netlifys servermiljöer och som Cloudflare Worker-secret:
+
+```powershell
+npm run game:deploy
+npx wrangler secret put GAME_TICKET_SECRET --config realtime/wrangler.toml
+```
+
+Lägg Worker-adressen `wss://inkastarna-arena.inkastarna.workers.dev` i Netlifys `NEXT_PUBLIC_GAME_WS_URL` och ange samma Worker-secret i Netlifys `GAME_TICKET_SECRET` för `production`, `deploy-preview` och `branch-deploy`. `APP_ORIGINS` i `realtime/wrangler.toml` ska innehålla appens tillåtna origins. För lokal Worker-utveckling används `realtime/.dev.vars`, som inte ska checkas in. Durable Object-namespacet och dess första SQLite-migrering skapas av Wrangler-konfigurationen. Spelet använder Cloudflares kostnadsfria nivå utan automatisk uppgradering; om dess dagliga gräns nås kan nya speloperationer nekas.
 
 ## Kontroller
 

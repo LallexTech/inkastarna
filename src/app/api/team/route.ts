@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { auth, isAdmin, isTeamAdmin, isTeamLeader, appOrigins } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { readLeague } from "@/lib/league-store";
+import { summarizeStarRatings } from "@/lib/star-ratings";
 import type { League } from "@/lib/types";
 import { z } from "zod";
 
@@ -25,14 +26,14 @@ export async function GET(request: Request) {
   const league=snapshot.rows[0]?.data as League|undefined;
   const [players, responses, lineups, teamLeads, teamAdmins, friendlies, presences, ballots, ratings, motms, currentPlayer, playerMatchStats] = await Promise.all([
     db.query(`SELECT r.id, r.display_name AS name, r.user_id IS NOT NULL AS "hasAccount", r.user_id, u.email, rp.number, COALESCE(rp.position,p.position,'Allround') AS position, (rp.photo IS NOT NULL) AS "hasPhoto", COALESCE(s.goals,0)::int AS goals, COALESCE(s.assists,0)::int AS assists, COALESCE(s.appearances,0)::int AS appearances, (ta.user_id IS NOT NULL) AS admin FROM roster r LEFT JOIN "user" u ON u.id=r.user_id LEFT JOIN roster_profile rp ON rp.player_id=r.id LEFT JOIN player_profile p ON p.user_id=r.user_id LEFT JOIN team_admin ta ON ta.user_id=r.user_id LEFT JOIN (SELECT ps.player_id,SUM(ps.goals)::int goals,SUM(ps.assists)::int assists,COUNT(*) FILTER(WHERE ps.played)::int appearances FROM player_stats ps LEFT JOIN friendly_match fm ON fm.id=ps.match_id WHERE fm.id IS NULL OR fm.include_in_stats GROUP BY ps.player_id) s ON s.player_id=r.id ORDER BY r.display_name`),
-    db.query('SELECT a.match_id AS "matchId", a.user_id AS "userId", u.name, a.status FROM attendance a JOIN "user" u ON u.id=a.user_id'),
+    db.query('SELECT a.match_id AS "matchId", a.user_id AS "userId", r.id AS "playerId", u.name, a.status FROM attendance a JOIN "user" u ON u.id=a.user_id LEFT JOIN roster r ON r.user_id=a.user_id'),
     db.query('SELECT match_id AS "matchId", slots, formation FROM lineup'),
     db.query("SELECT r.id FROM team_leader tl JOIN roster r ON r.user_id=tl.user_id"),
     db.query("SELECT r.id FROM team_admin ta JOIN roster r ON r.user_id=ta.user_id"),
     db.query("SELECT id,opponent,starts_at AS \"startsAt\",home_score AS \"homeScore\",away_score AS \"awayScore\",include_in_stats AS \"includeInStats\" FROM friendly_match ORDER BY starts_at DESC"),
     db.query('SELECT match_id AS "matchId",player_id AS "playerId",status FROM match_presence'),
     db.query('SELECT match_id AS "matchId",closed_at IS NULL AS open,closed_at IS NOT NULL AS closed FROM match_ballot'),
-    db.query(`SELECT mr.match_id AS "matchId",mr.player_id AS "playerId",AVG(mr.stars)::float AS average,COUNT(*)::int AS count FROM match_rating mr JOIN match_presence target ON target.match_id=mr.match_id AND target.player_id=mr.player_id AND target.status='played' JOIN match_vote v ON v.match_id=mr.match_id AND v.voter_user_id=mr.voter_user_id JOIN match_ballot b ON b.match_id=mr.match_id AND b.closed_at IS NOT NULL JOIN roster voter ON voter.user_id=v.voter_user_id JOIN match_presence vp ON vp.match_id=v.match_id AND vp.player_id=voter.id AND vp.status IN ('played','spectator') GROUP BY mr.match_id,mr.player_id`),
+    db.query(`SELECT mr.match_id AS "matchId",mr.player_id AS "playerId",ARRAY_AGG(mr.stars)::int[] AS stars FROM match_rating mr JOIN match_presence target ON target.match_id=mr.match_id AND target.player_id=mr.player_id AND target.status='played' JOIN match_vote v ON v.match_id=mr.match_id AND v.voter_user_id=mr.voter_user_id JOIN match_ballot b ON b.match_id=mr.match_id AND b.closed_at IS NOT NULL JOIN roster voter ON voter.user_id=v.voter_user_id JOIN match_presence vp ON vp.match_id=v.match_id AND vp.player_id=voter.id AND vp.status IN ('played','spectator') GROUP BY mr.match_id,mr.player_id`),
     db.query(`SELECT v.match_id AS "matchId",v.motm_player_id AS "playerId",COUNT(*)::int AS count,BOOL_AND(b.closed_at IS NOT NULL) AS closed,MAX(b.motm_winner_id) AS "winnerId" FROM match_vote v JOIN match_ballot b ON b.match_id=v.match_id JOIN roster voter ON voter.user_id=v.voter_user_id JOIN match_presence vp ON vp.match_id=v.match_id AND vp.player_id=voter.id AND vp.status IN ('played','spectator') JOIN match_presence target ON target.match_id=v.match_id AND target.player_id=v.motm_player_id AND target.status='played' WHERE v.motm_player_id IS NOT NULL GROUP BY v.match_id,v.motm_player_id`),
     db.query("SELECT id FROM roster WHERE user_id=$1", [session.user.id]),
     db.query('SELECT match_id AS "matchId",player_id AS "playerId",goals,assists,played FROM player_stats'),
@@ -41,28 +42,29 @@ export async function GET(request: Request) {
   const leader = await isTeamLeader(session.user.id, session.user.email);
   const officialIds = new Set((league?.matches ?? []).filter((m) => m.finished && (m.homeId === league?.teamId || m.awayId === league?.teamId)).map((m) => m.id));
   const matchRatings = ratings.rows.map((r) => {
+    const summary=summarizeStarRatings(r.stars);
     const closedMotms=motms.rows.filter((m) => m.matchId === r.matchId && m.closed);
-    return { matchId:r.matchId,playerId:r.playerId,average:r.average,winner: Boolean(closedMotms.find((m)=>m.winnerId===r.playerId)) };
+    return { matchId:r.matchId,playerId:r.playerId,average:summary.average,winner: Boolean(closedMotms.find((m)=>m.winnerId===r.playerId)) };
   });
-  const seasonRatings = new Map<string,{ total:number; count:number; matches:Set<number>; motm:number }>();
+  const seasonRatings = new Map<string,{ total:number; matchCount:number; matches:Set<number>; motm:number }>();
   const statisticMatchIds=new Set([...officialIds,...friendlies.rows.map((m)=>Number(m.id))]);
-  for (const r of ratings.rows) if (statisticMatchIds.has(Number(r.matchId))) {
-    const v=seasonRatings.get(r.playerId) ?? { total:0,count:0,matches:new Set<number>(),motm:0 };
-    v.total += Number(r.average)*Number(r.count); v.count += Number(r.count); v.matches.add(Number(r.matchId)); seasonRatings.set(r.playerId,v);
+  for (const r of matchRatings) if (statisticMatchIds.has(Number(r.matchId)) && r.average !== null) {
+    const v=seasonRatings.get(r.playerId) ?? { total:0,matchCount:0,matches:new Set<number>(),motm:0 };
+    v.total += r.average; v.matchCount++; v.matches.add(Number(r.matchId)); seasonRatings.set(r.playerId,v);
   }
   const officialMotmByMatch=new Map<number,typeof motms.rows>();
   for (const m of motms.rows) if (statisticMatchIds.has(Number(m.matchId)) && m.closed) officialMotmByMatch.set(Number(m.matchId),[...(officialMotmByMatch.get(Number(m.matchId))??[]),m]);
   for (const [matchId,rows] of officialMotmByMatch) {
     const winner=rows.find((x)=>x.winnerId);
-    if (winner) { const v=seasonRatings.get(winner.playerId) ?? {total:0,count:0,matches:new Set<number>(),motm:0}; v.motm++; seasonRatings.set(winner.playerId,v); }
+    if (winner) { const v=seasonRatings.get(winner.playerId) ?? {total:0,matchCount:0,matches:new Set<number>(),motm:0}; v.motm++; seasonRatings.set(winner.playerId,v); }
   }
   const friendlyMatches = friendlies.rows.map((m) => ({ id:m.id, startsAt:new Date(m.startsAt).toISOString(), location:"Träningsmatch", finished:true, home:"Inkastarna", away:m.opponent, homeId:27757, awayId:0, homeScore:m.homeScore===null?null:Number(m.homeScore), awayScore:m.awayScore===null?null:Number(m.awayScore), friendly:true, includeInStats:Boolean(m.includeInStats) }));
   return Response.json({
     players: players.rows.map(({ user_id, email, hasPhoto, ...p }) => ({ ...p, rootAdmin:isAdmin(email ?? ""), admin:Boolean(p.admin || isAdmin(email ?? "")), photoUrl:hasPhoto ? `/api/player-photo?id=${encodeURIComponent(p.id)}` : null })),
     attendance:responses.rows, lineups:lineups.rows, teamLeads:teamLeads.rows.map((r)=>r.id), teamAdmins:teamAdmins.rows.map((r)=>r.id), admin, leader,
     ...(admin ? { inviteCode:process.env.TEAM_JOIN_CODE } : {}), userId:session.user.id, playerId:currentPlayer.rows[0]?.id ?? null,
-    friendlyMatches, matchPresence:presences.rows, ballots:ballots.rows, ratings:matchRatings.map((r)=>({...r,average:Math.max(3,Number(r.average))})),
-    seasonRatings:[...seasonRatings.entries()].map(([playerId,v])=>({playerId,average:v.count ? Math.max(3,v.total/v.count) : null,matches:v.matches.size,motm:v.motm})), playerMatchStats:playerMatchStats.rows,
+    friendlyMatches, matchPresence:presences.rows, ballots:ballots.rows, ratings:matchRatings.map((r)=>({...r,average:r.average === null ? null : Math.max(3,r.average)})),
+    seasonRatings:[...seasonRatings.entries()].map(([playerId,v])=>({playerId,average:v.matchCount ? Math.max(3,v.total/v.matchCount) : null,matches:v.matches.size,motm:v.motm})), playerMatchStats:playerMatchStats.rows,
   }, { headers:{ "Cache-Control":"private, no-store" } });
 }
 
@@ -168,9 +170,15 @@ export async function POST(request: Request) {
     await db.query("INSERT INTO attendance(match_id,user_id,status) VALUES($1,$2,$3) ON CONFLICT(match_id,user_id) DO UPDATE SET status=$3,updated_at=now()",[data.matchId,session.user.id,data.status]);
   } else {
     if (!leader) return Response.json({error:"Bara lagledare kan spara laguppställningen."},{status:403});
+    const {league}=await readLeague();
+    const match=league?.matches.find((m)=>m.id===data.matchId && (m.homeId===league.teamId || m.awayId===league.teamId));
+    if (!match || match.finished || new Date(match.startsAt).getTime()<=Date.now()) return Response.json({error:"Välj en kommande match i lagets spelschema."},{status:404});
     const ids=data.slots.filter((x):x is string=>x!==null);
     if (new Set(ids).size!==ids.length) return Response.json({error:"En spelare kan bara ha en plats."},{status:400});
-    if (ids.length) { const users=await db.query("SELECT id FROM roster WHERE id=ANY($1::text[])",[ids]); if (users.rowCount!==ids.length) return Response.json({error:"Spelaren finns inte i truppen."},{status:400}); }
+    const eligible=ids.length ? await db.query("SELECT r.id,COALESCE(rp.position,p.position,'Allround') AS position FROM roster r LEFT JOIN roster_profile rp ON rp.player_id=r.id LEFT JOIN player_profile p ON p.user_id=r.user_id WHERE r.id=ANY($1::text[]) AND EXISTS(SELECT 1 FROM attendance a WHERE a.match_id=$2 AND a.user_id=r.user_id AND a.status='yes')",[ids,data.matchId]) : {rows:[],rowCount:0};
+    if (eligible.rowCount!==ids.length) return Response.json({error:"Alla spelare i uppställningen måste ha svarat Kommer på matchen."},{status:400});
+    const positions=new Map(eligible.rows.map((player)=>[player.id,player.position]));
+    if (data.slots.some((playerId,index)=>playerId!==null && (index===4 ? positions.get(playerId)!=="Målvakt" : positions.get(playerId)==="Målvakt"))) return Response.json({error:"Målvakter placeras i mål och utespelare på planen."},{status:400});
     await db.query("INSERT INTO lineup(match_id,slots,formation,updated_by) VALUES($1,$2,$3,$4) ON CONFLICT(match_id) DO UPDATE SET slots=$2,formation=$3,updated_by=$4,updated_at=now()",[data.matchId,JSON.stringify(data.slots),data.formation,session.user.id]);
   }
   return Response.json({ok:true});
