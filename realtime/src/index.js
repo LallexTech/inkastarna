@@ -2,6 +2,10 @@ const ROOM_CODE = /^[A-HJ-NP-Z2-9]{6}$/;
 const WIDTH = 1000;
 const HEIGHT = 600;
 const GAME_LENGTH = 5 * 60 * 1000;
+const CHARGE_DURATION_MS = 4000;
+const CHARGE_REST_MS = 4000;
+const CONFUSION_DURATION_MS = 3000;
+const ACTION_BUFFER_MS = 1200;
 const BODY_TYPES = {
   small: { radius: 16, speed: 255, tackleSpeed: 460, tackleForce: 300, cooldownMs: 1000 },
   medium: { radius: 19, speed: 220, tackleSpeed: 420, tackleForce: 390, cooldownMs: 2000 },
@@ -77,12 +81,14 @@ export class GameRoom {
         y: 150 + (teamCounts[team] % 4) * 100,
         vx: 0, vy: 0,
         bodyType: "medium",
-        input: { x: 0, y: 0, shot: false, heel: false },
+        input: { x: 0, y: 0 },
         facingX: identity.playerId ? 1 : 0,
         facingY: 0,
         knockbackX: 0, knockbackY: 0, stunnedUntil: 0, tackleCooldownUntil: 0,
         tackleSlideUntil: 0, tackleDirX: 1, tackleDirY: 0, tackleHitPlayer: false, tackleHitBall: false,
         tackleRequested: false,
+        shotRequestedUntil: 0, heelRequestedUntil: 0,
+        chargeRequested: false, chargeUntil: 0, chargeReadyAt: 0, slowedUntil: 0,
         disconnectedAt: null,
       });
       if (!this.game.hostId) this.game.hostId = identity.playerId;
@@ -90,6 +96,9 @@ export class GameRoom {
       existing.name = identity.name.slice(0, 60);
       existing.avatarUrl = typeof identity.avatarUrl === "string" && identity.avatarUrl.startsWith("/api/player-photo?id=") ? identity.avatarUrl : null;
       if (!BODY_TYPES[existing.bodyType]) existing.bodyType = "medium";
+      existing.chargeUntil ||= 0;
+      existing.chargeReadyAt ||= 0;
+      existing.slowedUntil ||= 0;
       existing.disconnectedAt = null;
     }
     if (!this.game.hostId) this.game.hostId = identity.playerId;
@@ -134,8 +143,11 @@ export class GameRoom {
       const x = Number(event.x);
       const y = Number(event.y);
       if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-      player.input = { x: clamp(x, -1, 1), y: clamp(y, -1, 1), shot: event.shot === true || event.kick === true, heel: event.heel === true };
+      player.input = { x: clamp(x, -1, 1), y: clamp(y, -1, 1) };
+      if (event.shot === true || event.kick === true) player.shotRequestedUntil = now + ACTION_BUFFER_MS;
+      if (event.heel === true) player.heelRequestedUntil = now + ACTION_BUFFER_MS;
       if (event.tackle === true) player.tackleRequested = true;
+      if (event.charge === true) player.chargeRequested = true;
       if (player.input.x || player.input.y) {
         const length = Math.hypot(player.input.x, player.input.y) || 1;
         player.facingX = player.input.x / length;
@@ -184,8 +196,9 @@ export class GameRoom {
     const player = this.game.players.find((entry) => entry.id === playerId);
     const stillConnected = this.activeSockets().some((candidate) => candidate !== socket && candidate.deserializeAttachment()?.playerId === playerId);
     if (player && !stillConnected) {
-      player.input = { x: 0, y: 0, shot: false, heel: false };
+      player.input = { x: 0, y: 0 };
       player.tackleRequested = false;
+      player.chargeRequested = false;
       player.disconnectedAt = Date.now();
       if (player.id === this.game.hostId) {
         const online = new Set(this.activeSockets().filter((candidate) => candidate !== socket).map((candidate) => candidate.deserializeAttachment()?.playerId));
@@ -249,6 +262,20 @@ export class GameRoom {
     if (removedHost) this.game.hostId = this.game.players.find((player) => online.has(player.id))?.id || null;
     const players = this.game.players;
     for (const player of players) {
+      player.chargeUntil ||= 0;
+      player.chargeReadyAt ||= 0;
+      player.slowedUntil ||= 0;
+      if (player.chargeRequested) {
+        player.chargeRequested = false;
+        if (now >= player.chargeReadyAt && now >= player.stunnedUntil) {
+          player.chargeUntil = now + CHARGE_DURATION_MS;
+          player.chargeReadyAt = now + CHARGE_DURATION_MS + CHARGE_REST_MS;
+        }
+      }
+      if (player.shotRequestedUntil && now > player.shotRequestedUntil) player.shotRequestedUntil = 0;
+      if (player.heelRequestedUntil && now > player.heelRequestedUntil) player.heelRequestedUntil = 0;
+    }
+    for (const player of players) {
       if (!player.tackleRequested) continue;
       player.tackleRequested = false;
       const stats = bodyStats(player);
@@ -273,8 +300,9 @@ export class GameRoom {
       const length = Math.hypot(player.input.x, player.input.y) || 1;
       const inputScale = stunned ? 0 : Math.min(1, 1 / length);
       const stats = bodyStats(player);
-      player.vx = player.input.x * inputScale * stats.speed + (sliding ? player.tackleDirX * stats.tackleSpeed : 0) + (player.knockbackX || 0);
-      player.vy = player.input.y * inputScale * stats.speed + (sliding ? player.tackleDirY * stats.tackleSpeed : 0) + (player.knockbackY || 0);
+      const runningSpeed = stats.speed * (now < player.chargeUntil ? 1.5 : now < player.slowedUntil ? 0.62 : 1);
+      player.vx = player.input.x * inputScale * runningSpeed + (sliding ? player.tackleDirX * stats.tackleSpeed : 0) + (player.knockbackX || 0);
+      player.vy = player.input.y * inputScale * runningSpeed + (sliding ? player.tackleDirY * stats.tackleSpeed : 0) + (player.knockbackY || 0);
       player.x = clamp(player.x + player.vx * dt, 24, WIDTH - 24);
       player.y = clamp(player.y + player.vy * dt, 24, HEIGHT - 24);
       player.knockbackX = (player.knockbackX || 0) * 0.88;
@@ -295,6 +323,7 @@ export class GameRoom {
         const targetForce = bodyStats(attacker).tackleForce + Math.random() * 90;
         target.knockbackX = Math.cos(targetAngle) * targetForce;
         target.knockbackY = Math.sin(targetAngle) * targetForce;
+        if (now >= (target.chargeUntil || 0)) target.slowedUntil = now + CONFUSION_DURATION_MS;
         const attackerAngle = angle + (Math.random() < 0.2 ? 0 : Math.PI) + (Math.random() - 0.5) * 0.55;
         attacker.knockbackX = Math.cos(attackerAngle) * 190;
         attacker.knockbackY = Math.sin(attackerAngle) * 190;
@@ -362,8 +391,8 @@ export class GameRoom {
           ball.vx += impulse * nx;
           ball.vy += impulse * ny;
         }
-        const shooting = player.input.shot && !player.wasShooting;
-        const heeling = player.input.heel && !player.wasHeeling;
+        const shooting = (player.shotRequestedUntil || 0) >= now;
+        const heeling = (player.heelRequestedUntil || 0) >= now;
         if (heeling || shooting) {
           const direction = heeling ? -1 : 1;
           const moving = Math.hypot(player.input.x, player.input.y) > 0.05;
@@ -373,10 +402,10 @@ export class GameRoom {
           ball.vx = directionX / length * 520 * direction;
           ball.vy = directionY / length * 520 * direction;
           this.game.lastKickBy = player.id;
+          player.shotRequestedUntil = 0;
+          player.heelRequestedUntil = 0;
         }
       }
-      player.wasShooting = player.input.shot;
-      player.wasHeeling = player.input.heel;
     }
 
     // Resolve player and ball contacts together so a ball cannot get wedged between players.
@@ -438,13 +467,13 @@ export class GameRoom {
       player.x = WIDTH / 2 + direction * (150 + Math.floor(index / 3) * 80);
       player.y = 170 + (index % 3) * 130;
       player.vx = 0; player.vy = 0;
-      player.input = { x: 0, y: 0, shot: false, heel: false };
+      player.input = { x: 0, y: 0 };
       player.knockbackX = 0; player.knockbackY = 0; player.stunnedUntil = 0;
       player.tackleCooldownUntil = 0; player.tackleSlideUntil = 0;
       player.tackleHitPlayer = false; player.tackleHitBall = false;
       player.tackleRequested = false;
-      player.wasShooting = false;
-      player.wasHeeling = false;
+      player.shotRequestedUntil = 0; player.heelRequestedUntil = 0;
+      player.chargeRequested = false; player.chargeUntil = 0; player.chargeReadyAt = 0; player.slowedUntil = 0;
     }
     this.game.ball = { x: WIDTH / 2, y: HEIGHT / 2, vx: 0, vy: 0 };
   }
@@ -459,7 +488,7 @@ export class GameRoom {
       score: this.game.score,
       remainingMs: this.game.remainingMs,
       ball: this.game.ball,
-      players: this.game.players.map(({ id, name, avatarUrl, team, bodyType, x, y, stunnedUntil, tackleCooldownUntil, tackleSlideUntil, tackleDirX, tackleDirY }) => ({ id, name, avatarUrl, team, bodyType: BODY_TYPES[bodyType] ? bodyType : "medium", x, y, knocked: (stunnedUntil || 0) > Date.now(), sliding: (tackleSlideUntil || 0) > Date.now(), slideX: tackleDirX || 0, slideY: tackleDirY || 0, tackleReadyAt: tackleCooldownUntil || 0, connected: connected.has(id) })),
+      players: this.game.players.map(({ id, name, avatarUrl, team, bodyType, x, y, stunnedUntil, tackleCooldownUntil, tackleSlideUntil, tackleDirX, tackleDirY, chargeUntil, chargeReadyAt, slowedUntil }) => ({ id, name, avatarUrl, team, bodyType: BODY_TYPES[bodyType] ? bodyType : "medium", x, y, knocked: (stunnedUntil || 0) > Date.now(), sliding: (tackleSlideUntil || 0) > Date.now(), slideX: tackleDirX || 0, slideY: tackleDirY || 0, tackleReadyAt: tackleCooldownUntil || 0, charged: (chargeUntil || 0) > Date.now(), chargeUntil: chargeUntil || 0, chargeReadyAt: chargeReadyAt || 0, confused: (slowedUntil || 0) > Date.now(), connected: connected.has(id) })),
     };
   }
 
