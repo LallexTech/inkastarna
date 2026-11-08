@@ -149,7 +149,7 @@ export class GameRoom {
       if (event.shot === true || event.kick === true) player.shotRequestedUntil = now + ACTION_BUFFER_MS;
       if (event.heel === true) player.heelRequestedUntil = now + ACTION_BUFFER_MS;
       if (event.tackle === true) player.tackleRequested = true;
-      if (event.charge === true) player.chargeRequested = true;
+      if (event.sprint === true || event.charge === true) player.chargeRequested = true;
       if (player.input.x || player.input.y) {
         const length = Math.hypot(player.input.x, player.input.y) || 1;
         player.facingX = player.input.x / length;
@@ -171,6 +171,17 @@ export class GameRoom {
         if (realPlayer) this.game.players.push(makeTestPlayer(realPlayer.team === 0 ? 1 : 0));
       }
       this.resetPositions();
+      if (connectedCount === 1) {
+        const realPlayer = this.game.players.find((entry) => entry.id !== TEST_PLAYER_ID);
+        const testPlayer = this.game.players.find((entry) => entry.id === TEST_PLAYER_ID);
+        if (realPlayer && testPlayer) {
+          const direction = realPlayer.team === 0 ? 1 : -1;
+          realPlayer.facingX = direction;
+          realPlayer.facingY = 0;
+          testPlayer.x = clamp(realPlayer.x + direction * 90, 24 + bodyStats(testPlayer).radius, WIDTH - 24 - bodyStats(testPlayer).radius);
+          testPlayer.y = realPlayer.y;
+        }
+      }
       this.game.phase = "playing";
       this.game.remainingMs = GAME_LENGTH;
       this.game.lastKickBy = null;
@@ -307,7 +318,9 @@ export class GameRoom {
       const length = Math.hypot(player.input.x, player.input.y) || 1;
       const inputScale = stunned ? 0 : Math.min(1, 1 / length);
       const stats = bodyStats(player);
-      const runningSpeed = stats.speed * (now < player.chargeUntil ? 1.5 : now < player.slowedUntil ? 0.62 : 1);
+      const sprintMultiplier = now < player.chargeUntil ? 1.5 : 1;
+      const confusionMultiplier = now < player.slowedUntil ? 0.62 : 1;
+      const runningSpeed = stats.speed * sprintMultiplier * confusionMultiplier;
       player.vx = player.input.x * inputScale * runningSpeed + (sliding ? player.tackleDirX * stats.tackleSpeed : 0) + (player.knockbackX || 0);
       player.vy = player.input.y * inputScale * runningSpeed + (sliding ? player.tackleDirY * stats.tackleSpeed : 0) + (player.knockbackY || 0);
       player.x = clamp(player.x + player.vx * dt, 24, WIDTH - 24);
@@ -330,7 +343,7 @@ export class GameRoom {
         const targetForce = bodyStats(attacker).tackleForce + Math.random() * 90;
         target.knockbackX = Math.cos(targetAngle) * targetForce;
         target.knockbackY = Math.sin(targetAngle) * targetForce;
-        if (now >= (target.chargeUntil || 0)) target.slowedUntil = now + CONFUSION_DURATION_MS;
+        target.slowedUntil = now + tackleConfusionDuration(attacker, target);
         const attackerAngle = angle + (Math.random() < 0.2 ? 0 : Math.PI) + (Math.random() - 0.5) * 0.55;
         attacker.knockbackX = Math.cos(attackerAngle) * 190;
         attacker.knockbackY = Math.sin(attackerAngle) * 190;
@@ -646,6 +659,14 @@ function makeTestPlayer(team) {
     slowedUntil: 0,
     disconnectedAt: null,
   };
+}
+
+function tackleConfusionDuration(attacker, target) {
+  const ranks = { small: 0, medium: 1, large: 2 };
+  const difference = (ranks[target.bodyType] ?? 1) - (ranks[attacker.bodyType] ?? 1);
+  if (difference > 0) return Math.min(1000, CONFUSION_DURATION_MS);
+  if (difference === 0) return Math.min(2000, CONFUSION_DURATION_MS);
+  return CONFUSION_DURATION_MS;
 }
 
 function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }
