@@ -71,9 +71,10 @@ export class GameRoom {
         x: team === 0 ? 220 : WIDTH - 220,
         y: 150 + (teamCounts[team] % 4) * 100,
         vx: 0, vy: 0,
-        input: { x: 0, y: 0, shot: false, heel: false },
+        input: { x: 0, y: 0, shot: false, heel: false, charge: false },
         facingX: identity.playerId ? 1 : 0,
         facingY: 0,
+        knockbackX: 0, knockbackY: 0, stunnedUntil: 0, tackleCooldownUntil: 0, tackleReady: true,
         disconnectedAt: null,
       });
       if (!this.game.hostId) this.game.hostId = identity.playerId;
@@ -124,7 +125,7 @@ export class GameRoom {
       const x = Number(event.x);
       const y = Number(event.y);
       if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-      player.input = { x: clamp(x, -1, 1), y: clamp(y, -1, 1), shot: event.shot === true || event.kick === true, heel: event.heel === true };
+      player.input = { x: clamp(x, -1, 1), y: clamp(y, -1, 1), shot: event.shot === true || event.kick === true, heel: event.heel === true, charge: event.charge === true };
       if (player.input.x || player.input.y) {
         const length = Math.hypot(player.input.x, player.input.y) || 1;
         player.facingX = player.input.x / length;
@@ -167,7 +168,7 @@ export class GameRoom {
     const player = this.game.players.find((entry) => entry.id === playerId);
     const stillConnected = this.activeSockets().some((candidate) => candidate !== socket && candidate.deserializeAttachment()?.playerId === playerId);
     if (player && !stillConnected) {
-      player.input = { x: 0, y: 0, shot: false, heel: false };
+      player.input = { x: 0, y: 0, shot: false, heel: false, charge: false };
       player.disconnectedAt = Date.now();
       if (player.id === this.game.hostId) {
         const online = new Set(this.activeSockets().filter((candidate) => candidate !== socket).map((candidate) => candidate.deserializeAttachment()?.playerId));
@@ -224,18 +225,63 @@ export class GameRoom {
   }
 
   simulate(dt) {
+    const now = Date.now();
     const online = new Set(this.activeSockets().map((socket) => socket.deserializeAttachment()?.playerId));
-    const removedHost = this.game.players.some((player) => player.id === this.game.hostId && player.disconnectedAt && Date.now() - player.disconnectedAt > 60_000);
-    this.game.players = this.game.players.filter((player) => !(player.disconnectedAt && Date.now() - player.disconnectedAt > 60_000));
+    const removedHost = this.game.players.some((player) => player.id === this.game.hostId && player.disconnectedAt && now - player.disconnectedAt > 60_000);
+    this.game.players = this.game.players.filter((player) => !(player.disconnectedAt && now - player.disconnectedAt > 60_000));
     if (removedHost) this.game.hostId = this.game.players.find((player) => online.has(player.id))?.id || null;
     const players = this.game.players;
     for (const player of players) {
+      if (!player.input.charge) player.tackleReady = true;
+      const stunned = now < (player.stunnedUntil || 0);
       const length = Math.hypot(player.input.x, player.input.y) || 1;
-      const inputScale = Math.min(1, 1 / length);
-      player.vx = player.input.x * inputScale * 220;
-      player.vy = player.input.y * inputScale * 220;
+      const inputScale = stunned ? 0 : Math.min(1, 1 / length);
+      const speed = player.input.charge && !stunned ? 300 : 220;
+      player.vx = player.input.x * inputScale * speed + (player.knockbackX || 0);
+      player.vy = player.input.y * inputScale * speed + (player.knockbackY || 0);
       player.x = clamp(player.x + player.vx * dt, 24, WIDTH - 24);
       player.y = clamp(player.y + player.vy * dt, 24, HEIGHT - 24);
+      player.knockbackX = (player.knockbackX || 0) * 0.88;
+      player.knockbackY = (player.knockbackY || 0) * 0.88;
+    }
+
+    for (let a = 0; a < players.length; a++) for (let b = a + 1; b < players.length; b++) {
+      const one = players[a]; const two = players[b];
+      const dx = two.x - one.x; const dy = two.y - one.y;
+      if (Math.hypot(dx, dy) >= 46) continue;
+      const nx = dx / (Math.hypot(dx, dy) || 1); const ny = dy / (Math.hypot(dx, dy) || 1);
+      const canTackle = (player, towardX, towardY) => {
+        if (!player.input.charge || player.tackleReady === false || now < (player.tackleCooldownUntil || 0) || Math.hypot(player.vx, player.vy) < 130) return false;
+        const moving = Math.hypot(player.input.x, player.input.y) > 0.05;
+        const moveX = moving ? player.input.x : player.facingX || 0;
+        const moveY = moving ? player.input.y : player.facingY || 0;
+        return (moveX * towardX + moveY * towardY) / (Math.hypot(moveX, moveY) || 1) > 0.25;
+      };
+      const oneCanTackle = canTackle(one, nx, ny);
+      const twoCanTackle = canTackle(two, -nx, -ny);
+      if (!oneCanTackle && !twoCanTackle) continue;
+      const attacker = oneCanTackle && twoCanTackle ? (Math.random() < 0.5 ? one : two) : oneCanTackle ? one : two;
+      const target = attacker === one ? two : one;
+      const moving = Math.hypot(attacker.input.x, attacker.input.y) > 0.05;
+      const moveX = moving ? attacker.input.x : attacker.facingX || 1;
+      const moveY = moving ? attacker.input.y : attacker.facingY || 0;
+      const moveLength = Math.hypot(moveX, moveY) || 1;
+      const angle = Math.atan2(moveY / moveLength, moveX / moveLength);
+      const targetAngle = angle + (Math.random() - 0.5) * 0.75;
+      const targetForce = 330 + Math.random() * 100;
+      target.knockbackX = Math.cos(targetAngle) * targetForce;
+      target.knockbackY = Math.sin(targetAngle) * targetForce;
+      const stumbleForward = Math.random() < 0.22;
+      const attackerAngle = angle + (stumbleForward ? 0 : Math.PI) + (Math.random() - 0.5) * 0.5;
+      const attackerForce = stumbleForward ? 150 : 220;
+      attacker.knockbackX = Math.cos(attackerAngle) * attackerForce;
+      attacker.knockbackY = Math.sin(attackerAngle) * attackerForce;
+      attacker.stunnedUntil = now + 420;
+      target.stunnedUntil = now + 520;
+      attacker.tackleCooldownUntil = now + 900;
+      target.tackleCooldownUntil = now + 900;
+      attacker.tackleReady = false;
+      target.tackleReady = false;
     }
 
     // Cheap solver passes keep crowded groups from ending a tick overlapped.
@@ -280,8 +326,9 @@ export class GameRoom {
         const heeling = player.input.heel && !player.wasHeeling;
         if (heeling || shooting) {
           const direction = heeling ? -1 : 1;
-          const directionX = player.input.x || player.facingX || (player.team === 0 ? 1 : -1);
-          const directionY = player.input.y || player.facingY;
+          const moving = Math.hypot(player.input.x, player.input.y) > 0.05;
+          const directionX = moving ? player.input.x : player.facingX || (player.team === 0 ? 1 : -1);
+          const directionY = moving ? player.input.y : player.facingY || 0;
           const length = Math.hypot(directionX, directionY) || 1;
           ball.vx = directionX / length * 520 * direction;
           ball.vy = directionY / length * 520 * direction;
@@ -349,7 +396,9 @@ export class GameRoom {
       player.x = WIDTH / 2 + direction * (150 + Math.floor(index / 3) * 80);
       player.y = 170 + (index % 3) * 130;
       player.vx = 0; player.vy = 0;
-      player.input = { x: 0, y: 0, shot: false, heel: false };
+      player.input = { x: 0, y: 0, shot: false, heel: false, charge: false };
+      player.knockbackX = 0; player.knockbackY = 0; player.stunnedUntil = 0;
+      player.tackleCooldownUntil = 0; player.tackleReady = true;
       player.wasShooting = false;
       player.wasHeeling = false;
     }
@@ -366,7 +415,7 @@ export class GameRoom {
       score: this.game.score,
       remainingMs: this.game.remainingMs,
       ball: this.game.ball,
-      players: this.game.players.map(({ id, name, avatarUrl, team, x, y }) => ({ id, name, avatarUrl, team, x, y, connected: connected.has(id) })),
+      players: this.game.players.map(({ id, name, avatarUrl, team, x, y, stunnedUntil }) => ({ id, name, avatarUrl, team, x, y, knocked: (stunnedUntil || 0) > Date.now(), connected: connected.has(id) })),
     };
   }
 
