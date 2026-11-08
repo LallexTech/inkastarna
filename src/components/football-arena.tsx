@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Copy, Gamepad2, LogOut, Play, RefreshCw, Users } from "lucide-react";
 
 type BodyType = "small" | "medium" | "large";
-type GamePlayer = { id: string; name: string; avatarUrl?: string | null; team: number; bodyType?: BodyType; x: number; y: number; knocked?: boolean; sliding?: boolean; slideX?: number; slideY?: number; tackleReadyAt?: number; charged?: boolean; chargeUntil?: number; chargeReadyAt?: number; confused?: boolean; connected: boolean };
+type GamePlayer = { id: string; name: string; avatarUrl?: string | null; team: number; bodyType?: BodyType; x: number; y: number; knocked?: boolean; sliding?: boolean; slideX?: number; slideY?: number; tackleReadyAt?: number; charged?: boolean; chargeUntil?: number; chargeReadyAt?: number; confused?: boolean; testPlayer?: boolean; connected: boolean };
 type GameState = {
   type: "state";
   phase: "lobby" | "playing" | "finished";
@@ -49,7 +49,7 @@ export default function FootballArena({ playerId }: { playerId: string | null })
   }, []);
 
   useEffect(() => {
-    if (!playerId || roomId) { setOpenRooms([]); return; }
+    if (roomId) { setOpenRooms([]); return; }
     const workerUrl = process.env.NEXT_PUBLIC_GAME_WS_URL;
     if (!workerUrl) return;
     const roomsUrl = workerUrl.replace(/^wss:/, "https:").replace(/^ws:/, "http:").replace(/\/$/, "") + "/rooms";
@@ -278,8 +278,8 @@ export default function FootballArena({ playerId }: { playerId: string | null })
           context.fillStyle = player.team === 0 ? "#f25a57" : "#4ba8ff"; context.fillRect(point.x - radius, point.y - radius, radius * 2, radius * 2);
           if (avatar?.complete && avatar.naturalWidth > 0) context.drawImage(avatar, point.x - radius, point.y - radius, radius * 2, radius * 2);
           else {
-            const initials = player.name.trim().split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase();
-            context.fillStyle = "#fff"; context.font = "700 13px Arial"; context.textAlign = "center"; context.textBaseline = "middle";
+            const initials = player.testPlayer ? "BOT" : player.name.trim().split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase();
+            context.fillStyle = "#fff"; context.font = `700 ${player.testPlayer ? 10 : 13}px Arial`; context.textAlign = "center"; context.textBaseline = "middle";
             context.fillText(initials, point.x, point.y + 1);
           }
           context.restore();
@@ -369,7 +369,8 @@ export default function FootballArena({ playerId }: { playerId: string | null })
   const sendStart = () => send({ type: "start" });
   const sendRematch = () => send({ type: "rematch" });
   const isHost = game?.hostId === playerId;
-  const canStart = (game?.players.filter((player) => player.connected).length ?? 0) >= 2;
+  const connectedPlayers = game?.players.filter((player) => player.connected).length ?? 0;
+  const canStart = connectedPlayers >= 1;
   const localPlayer = game?.players.find((player) => player.id === playerId);
   const tackleRemainingMs = Math.max(0, (localPlayer?.tackleReadyAt ?? 0) - Date.now());
   const chargeRemainingMs = Math.max(0, (localPlayer?.chargeUntil ?? 0) - Date.now());
@@ -383,7 +384,7 @@ export default function FootballArena({ playerId }: { playerId: string | null })
           <Gamepad2 size={23} />
         </div>
         {!playerId ? (
-          <div className="arena-message">Koppla ditt konto till en spelarprofil för att gå med i spelet.</div>
+          <div className="arena-entry"><p>Logga in och koppla ditt konto till en spelarprofil för att spela. Öppna matcher visas här ändå:</p><OpenRoomsList rooms={openRooms} canJoin={false} onJoin={enterRoom} /></div>
         ) : !roomId ? (
           <div className="arena-entry">
             <p>Skapa ett rum och bjud in lagkamrater. Två till tio spelare kan vara med.</p>
@@ -392,13 +393,7 @@ export default function FootballArena({ playerId }: { playerId: string | null })
               <label htmlFor="arena-room-code">Gå med med rumskod</label>
               <div><input id="arena-room-code" value={roomDraft} maxLength={6} onChange={(event) => setRoomDraft(event.target.value.toUpperCase())} placeholder="ABC123" /><button className="button subtle">Gå med</button></div>
             </form>
-            {openRooms.length > 0 && <div className="arena-open-rooms">
-              <div className="arena-open-rooms-heading"><strong>Spelrum öppna nu</strong><span>{openRooms.length}</span></div>
-              {openRooms.map((room) => <div className="arena-open-room" key={room.roomId}>
-                <div><strong>{room.roomId}</strong><span>{room.phase === "playing" ? "Match pågår" : "Väntar på spelare"} · {room.connected}/10 anslutna</span></div>
-                <button className="button subtle" onClick={() => enterRoom(room.roomId)}><Play size={13} /> Gå med</button>
-              </div>)}
-            </div>}
+            <OpenRoomsList rooms={openRooms} canJoin={Boolean(playerId)} onJoin={enterRoom} />
           </div>
         ) : (
           <>
@@ -425,7 +420,7 @@ export default function FootballArena({ playerId }: { playerId: string | null })
                   {[0, 1].map((side) => (
                     <div className={`arena-team team-${side}`} key={side}>
                       <strong>{side === 0 ? "Röda laget" : "Blå laget"}</strong>
-                      {(game?.players ?? []).filter((player) => player.team === side).map((player) => <span key={player.id} className={!player.connected ? "offline" : ""}>{player.name} · {bodyTypes.find((type) => type.id === player.bodyType)?.label.toLowerCase() ?? "mellan"}{player.id === game?.hostId ? " · värd" : ""}{!player.connected ? " · återansluter" : ""}</span>)}
+                      {(game?.players ?? []).filter((player) => player.team === side).map((player) => <span key={player.id} className={!player.connected ? "offline" : ""}>{player.name}{player.testPlayer ? " · står still tills någon går med" : ` · ${bodyTypes.find((type) => type.id === player.bodyType)?.label.toLowerCase() ?? "mellan"}`}{player.id === game?.hostId ? " · värd" : ""}{!player.connected && !player.testPlayer ? " · återansluter" : ""}</span>)}
                     </div>
                   ))}
                 </div>
@@ -436,8 +431,8 @@ export default function FootballArena({ playerId }: { playerId: string | null })
                   </button>)}</div>
                 </div>}
                 {connection !== "connected" && <p className="arena-hint"><RefreshCw size={14} /> Väntar på anslutning till spelservern…</p>}
-                {game?.phase === "finished" ? <div className="arena-finish">Slutresultat: {game.score[0]}–{game.score[1]}</div> : <p className="arena-hint">Fem minuter · balanserade lag · första spelaren blir värd</p>}
-                {isHost && game?.phase === "lobby" && <button className="button dark" disabled={!canStart || connection !== "connected"} onClick={sendStart}><Play size={15} /> Starta match</button>}
+                {game?.phase === "finished" ? <div className="arena-finish">Slutresultat: {game.score[0]}–{game.score[1]}</div> : <p className="arena-hint">{connectedPlayers === 1 ? "Testa själv mot en stillastående testspelare. Den byts ut när en lagkamrat ansluter." : "Fem minuter · balanserade lag · första spelaren blir värd"}</p>}
+                {isHost && game?.phase === "lobby" && <button className="button dark" disabled={!canStart || connection !== "connected"} onClick={sendStart}><Play size={15} /> {connectedPlayers === 1 ? "Starta testmatch" : "Starta match"}</button>}
                 {isHost && game?.phase === "finished" && <button className="button dark" onClick={sendRematch}><RefreshCw size={15} /> Spela igen</button>}
                 {!isHost && game?.phase === "lobby" && <p className="arena-hint">Väntar på att värden startar matchen.</p>}
               </div>
@@ -446,9 +441,20 @@ export default function FootballArena({ playerId }: { playerId: string | null })
         )}
         {!roomId && error && <div className="arena-error" role="status">{error}</div>}
       </section>
-      <section className="panel arena-help"><div className="panel-heading"><h2>Så spelar ni</h2><Gamepad2 size={21} /></div><ul><li>På mobil: styr med joysticken. SKJUT och KLACK registreras som separata tryck även om bollen inte är precis intill.</li><li><b>CHARGE</b> ger 4 sekunders fartökning följt av 4 sekunders vila. En laddad spelare syns med grön ring och blixt.</li><li>En glidtackling som träffar en spelare som inte är laddad gör spelaren långsammare i 3 sekunder och visar en förvirringsstjärna.</li><li>Tacklingen glider framåt i styrd eller senast vald riktning och ger en slumpmässig knuff vid träff. Efter glidet låses rörelsen en halv sekund. Cooldownen beror på kroppstyp: 1, 2 eller 3 sekunder.</li><li><b>Liten</b> springer snabbt; <b>stor</b> är långsammare men tacklar hårdare; <b>mellan</b> är balanserad.</li><li>På dator: WASD eller pilar, mellanslag för skott, F för klack, E för charge och Shift för glidtackling.</li><li>Öppna rum syns direkt i listan här och kan anslutas med ett tryck.</li></ul></section>
+      <section className="panel arena-help"><div className="panel-heading"><h2>Så spelar ni</h2><Gamepad2 size={21} /></div><ul><li>På mobil: styr med joysticken. SKJUT och KLACK registreras som separata tryck även om bollen inte är precis intill.</li><li><b>CHARGE</b> ger 4 sekunders fartökning följt av 4 sekunders vila. En laddad spelare syns med grön ring och blixt.</li><li>En glidtackling som träffar en spelare som inte är laddad gör spelaren långsammare i 3 sekunder och visar en förvirringsstjärna.</li><li>Starta själv med en stillastående testspelare; den försvinner när en lagkamrat går med.</li><li>Tacklingen glider framåt i styrd eller senast vald riktning och ger en slumpmässig knuff vid träff. Efter glidet låses rörelsen en halv sekund. Cooldownen beror på kroppstyp: 1, 2 eller 3 sekunder.</li><li><b>Liten</b> springer snabbt; <b>stor</b> är långsammare men tacklar hårdare; <b>mellan</b> är balanserad.</li><li>På dator: WASD eller pilar, mellanslag för skott, F för klack, E för charge och Shift för glidtackling.</li><li>Öppna rum syns direkt i listan här och kan anslutas med ett tryck.</li></ul></section>
     </div>
   );
+}
+
+function OpenRoomsList({ rooms, canJoin, onJoin }: { rooms: OpenRoom[]; canJoin: boolean; onJoin: (roomId: string) => void }) {
+  if (rooms.length === 0) return null;
+  return <div className="arena-open-rooms">
+    <div className="arena-open-rooms-heading"><strong>Spelrum öppna nu</strong><span>{rooms.length}</span></div>
+    {rooms.map((room) => <div className="arena-open-room" key={room.roomId}>
+      <div><strong>{room.roomId}</strong><span>{room.phase === "playing" ? "Match pågår" : "Väntar på spelare"} · {room.connected}/10 anslutna</span></div>
+      <button className="button subtle" disabled={!canJoin} onClick={() => onJoin(room.roomId)} title={canJoin ? undefined : "Logga in och koppla en spelarprofil för att gå med"}><Play size={13} /> {canJoin ? "Gå med" : "Logga in"}</button>
+    </div>)}
+  </div>;
 }
 
 function MobileControls({ press, onAction, tackleRemainingMs, chargeRemainingMs, chargeRestMs }: { press: (patch: Partial<InputState>) => void; onAction: (action: keyof ActionRequests) => void; tackleRemainingMs: number; chargeRemainingMs: number; chargeRestMs: number }) {

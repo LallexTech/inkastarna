@@ -6,6 +6,7 @@ const CHARGE_DURATION_MS = 4000;
 const CHARGE_REST_MS = 4000;
 const CONFUSION_DURATION_MS = 3000;
 const ACTION_BUFFER_MS = 1200;
+const TEST_PLAYER_ID = "__inkastarna_test_player__";
 const BODY_TYPES = {
   small: { radius: 16, speed: 255, tackleSpeed: 460, tackleForce: 300, cooldownMs: 1000 },
   medium: { radius: 19, speed: 220, tackleSpeed: 420, tackleForce: 390, cooldownMs: 2000 },
@@ -67,6 +68,7 @@ export class GameRoom {
     if (!this.game.roomId) this.game.roomId = identity.roomId;
 
     const existing = this.game.players.find((player) => player.id === identity.playerId);
+    if (!existing) this.game.players = this.game.players.filter((player) => player.id !== TEST_PLAYER_ID);
     if (!existing && this.game.players.length >= 10) return new Response("Rummet är fullt.", { status: 409 });
     if (!existing) {
       const teamCounts = [0, 0];
@@ -162,7 +164,12 @@ export class GameRoom {
       return;
     }
     if (event.type === "start" && player.id === this.game.hostId && this.game.phase === "lobby") {
-      if (this.activeSockets().length < 2) return;
+      const connectedCount = this.activeSockets().length;
+      if (connectedCount < 1) return;
+      if (connectedCount === 1 && !this.game.players.some((entry) => entry.id === TEST_PLAYER_ID)) {
+        const realPlayer = this.game.players.find((entry) => entry.id !== TEST_PLAYER_ID);
+        if (realPlayer) this.game.players.push(makeTestPlayer(realPlayer.team === 0 ? 1 : 0));
+      }
       this.resetPositions();
       this.game.phase = "playing";
       this.game.remainingMs = GAME_LENGTH;
@@ -488,7 +495,7 @@ export class GameRoom {
       score: this.game.score,
       remainingMs: this.game.remainingMs,
       ball: this.game.ball,
-      players: this.game.players.map(({ id, name, avatarUrl, team, bodyType, x, y, stunnedUntil, tackleCooldownUntil, tackleSlideUntil, tackleDirX, tackleDirY, chargeUntil, chargeReadyAt, slowedUntil }) => ({ id, name, avatarUrl, team, bodyType: BODY_TYPES[bodyType] ? bodyType : "medium", x, y, knocked: (stunnedUntil || 0) > Date.now(), sliding: (tackleSlideUntil || 0) > Date.now(), slideX: tackleDirX || 0, slideY: tackleDirY || 0, tackleReadyAt: tackleCooldownUntil || 0, charged: (chargeUntil || 0) > Date.now(), chargeUntil: chargeUntil || 0, chargeReadyAt: chargeReadyAt || 0, confused: (slowedUntil || 0) > Date.now(), connected: connected.has(id) })),
+      players: this.game.players.map(({ id, name, avatarUrl, team, bodyType, x, y, stunnedUntil, tackleCooldownUntil, tackleSlideUntil, tackleDirX, tackleDirY, chargeUntil, chargeReadyAt, slowedUntil }) => ({ id, name, avatarUrl, team, bodyType: BODY_TYPES[bodyType] ? bodyType : "medium", x, y, knocked: (stunnedUntil || 0) > Date.now(), sliding: (tackleSlideUntil || 0) > Date.now(), slideX: tackleDirX || 0, slideY: tackleDirY || 0, tackleReadyAt: tackleCooldownUntil || 0, charged: (chargeUntil || 0) > Date.now(), chargeUntil: chargeUntil || 0, chargeReadyAt: chargeReadyAt || 0, confused: (slowedUntil || 0) > Date.now(), testPlayer: id === TEST_PLAYER_ID, connected: connected.has(id) })),
     };
   }
 
@@ -527,7 +534,7 @@ export class GameRoom {
     const room = {
       roomId: this.game.roomId,
       phase: this.game.phase,
-      players: this.game.players.length,
+      players: this.game.players.filter((player) => player.id !== TEST_PLAYER_ID).length,
       connected: connected.size,
       updatedAt: now,
     };
@@ -605,6 +612,40 @@ function originAllowed(origin, configuredOrigins) {
 
 function emptyGame() {
   return { roomId: null, phase: "lobby", hostId: null, players: [], score: [0, 0], remainingMs: GAME_LENGTH, ball: { x: WIDTH / 2, y: HEIGHT / 2, vx: 0, vy: 0 }, lastKickBy: null };
+}
+
+function makeTestPlayer(team) {
+  return {
+    id: TEST_PLAYER_ID,
+    name: "Testspelare",
+    avatarUrl: null,
+    team,
+    bodyType: "medium",
+    x: team === 0 ? 220 : WIDTH - 220,
+    y: HEIGHT / 2,
+    vx: 0,
+    vy: 0,
+    input: { x: 0, y: 0 },
+    facingX: team === 0 ? 1 : -1,
+    facingY: 0,
+    knockbackX: 0,
+    knockbackY: 0,
+    stunnedUntil: 0,
+    tackleCooldownUntil: 0,
+    tackleSlideUntil: 0,
+    tackleDirX: team === 0 ? 1 : -1,
+    tackleDirY: 0,
+    tackleHitPlayer: false,
+    tackleHitBall: false,
+    tackleRequested: false,
+    shotRequestedUntil: 0,
+    heelRequestedUntil: 0,
+    chargeRequested: false,
+    chargeUntil: 0,
+    chargeReadyAt: 0,
+    slowedUntil: 0,
+    disconnectedAt: null,
+  };
 }
 
 function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }
