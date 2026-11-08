@@ -53,6 +53,17 @@ await db.query(`
     updated_at timestamptz NOT NULL DEFAULT now(),
     CHECK ((photo IS NULL) = (photo_type IS NULL))
   );
+  CREATE TABLE IF NOT EXISTS roster_game_profile (
+    player_id text PRIMARY KEY REFERENCES roster(id) ON DELETE CASCADE,
+    speed integer NOT NULL DEFAULT 3 CHECK(speed BETWEEN 1 AND 5),
+    acceleration integer NOT NULL DEFAULT 3 CHECK(acceleration BETWEEN 1 AND 5),
+    size integer NOT NULL DEFAULT 3 CHECK(size BETWEEN 1 AND 5),
+    tackling integer NOT NULL DEFAULT 3 CHECK(tackling BETWEEN 1 AND 5),
+    ability_id text,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  );
+  INSERT INTO roster_game_profile(player_id)
+    SELECT id FROM roster WHERE true ON CONFLICT(player_id) DO NOTHING;
   INSERT INTO roster_profile(player_id,number,position)
     SELECT r.id,p.number,p.position FROM roster r JOIN player_profile p ON p.user_id=r.user_id
     ON CONFLICT(player_id) DO NOTHING;

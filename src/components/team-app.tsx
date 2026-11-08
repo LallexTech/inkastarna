@@ -41,6 +41,7 @@ import { authClient } from "@/lib/auth-client";
 import { calendarEvent } from "@/lib/calendar";
 import { randomLineup } from "@/lib/lineup";
 import type { Formation, League, Match, Standing, TeamData } from "@/lib/types";
+import abilities from "../../shared/arena-abilities.json";
 import FootballArena from "@/components/football-arena";
 
 type Tab =
@@ -203,6 +204,7 @@ export default function TeamApp() {
     [mobileOpen, setMobileOpen] = useState(false);
   const [inviteCode, setInviteCode] = useState("");
   const [editPlayer, setEditPlayer] = useState<TeamData["players"][number] | null | undefined>(undefined);
+  const [gameProfilePlayer, setGameProfilePlayer] = useState<TeamData["players"][number] | null | undefined>(undefined);
   const [friendlyEditor, setFriendlyEditor] = useState<Match | null | undefined>(undefined);
   const [voteDetail, setVoteDetail] = useState<VoteDetail | null>(null);
   const [showInstallOffer, setShowInstallOffer] = useState(false);
@@ -1330,6 +1332,11 @@ export default function TeamApp() {
                               <span>{p.position}</span>
                             </div>
                             {team?.admin && <button className="player-edit button subtle" onClick={()=>setEditPlayer(p)}><Pencil size={14}/> Redigera</button>}
+                            {team?.leader && <button className="player-edit button subtle" onClick={()=>setGameProfilePlayer(p)}>Spelegenskaper</button>}
+                            <div className="player-card-game-profile" aria-label={`Spelegenskaper för ${p.name}`}>
+                              <span>Fart {p.gameProfile.speed}/5</span><span>Acceleration {p.gameProfile.acceleration}/5</span><span>Storlek {p.gameProfile.size}/5</span><span>Tackling {p.gameProfile.tackling}/5</span>
+                              <small>{abilities.find((ability) => ability.id === p.gameProfile.abilityId)?.name ?? "Ingen superförmåga"}</small>
+                            </div>
                             <div className="player-card-stats">
                               <span>
                                 <b>{p.appearances}</b>matcher
@@ -1597,7 +1604,7 @@ export default function TeamApp() {
                 </>
               )}
               {active === "game" && (
-                !session ? authGate() : <FootballArena playerId={team?.playerId ?? null} />
+                !session ? authGate() : <FootballArena playerId={team?.playerId ?? null} players={team?.players ?? []} />
               )}
             </>
           )}
@@ -1698,6 +1705,7 @@ export default function TeamApp() {
         />
       )}
       {editPlayer !== undefined && team?.admin && <PlayerEditorModal player={editPlayer} busy={busy} onClose={()=>setEditPlayer(undefined)} onSave={save} onPhoto={uploadPlayerPhoto} />}
+      {gameProfilePlayer && team?.leader && <GameProfileEditorModal player={gameProfilePlayer} busy={busy} onClose={()=>setGameProfilePlayer(undefined)} onSave={save} />}
       {friendlyEditor !== undefined && team?.leader && <FriendlyMatchEditorModal match={friendlyEditor} busy={busy} onClose={()=>setFriendlyEditor(undefined)} onSave={save} />}
       {selected && (
         <Modal
@@ -2158,6 +2166,18 @@ function PlayerEditorModal({player,busy,onClose,onSave,onPhoto}:{player:TeamData
     </form>
     {player && <label className="photo-upload">Profilbild<input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={async(e)=>{const file=e.currentTarget.files?.[0];if(file)await onPhoto(player.id,file);e.currentTarget.value="";}}/></label>}
     {player?.photoUrl && <button className="auth-switch" disabled={busy} onClick={()=>void onPhoto(player.id,null)}>Ta bort profilbild</button>}
+  </Modal>;
+}
+
+function GameProfileEditorModal({player,busy,onClose,onSave}:{player:TeamData["players"][number];busy:boolean;onClose:()=>void;onSave:(d:Record<string,unknown>)=>Promise<boolean>}) {
+  const profile=player.gameProfile;
+  return <Modal title={`Spelegenskaper · ${player.name}`} onClose={onClose}>
+    <p className="form-note">Värdena 1–5 påverkar spelarens egenskaper i fotbollsarenan. 3 är normalt.</p>
+    <form className="auth-form" onSubmit={async(event)=>{event.preventDefault();const form=new FormData(event.currentTarget);const abilityId=String(form.get("abilityId")||"");const ok=await onSave({type:"rosterGameProfile",playerId:player.id,speed:Number(form.get("speed")),acceleration:Number(form.get("acceleration")),size:Number(form.get("size")),tackling:Number(form.get("tackling")),abilityId:abilityId||null});if(ok)onClose();}}>
+      <div className="form-columns">{([["speed","Snabbhet"],["acceleration","Acceleration"],["size","Storlek/vikt"],["tackling","Tackling"]] as const).map(([field,label])=><label key={field}>{label}<select name={field} defaultValue={profile[field]}>{[1,2,3,4,5].map((value)=><option key={value} value={value}>{value}{value===3?" · normal":""}</option>)}</select></label>)}</div>
+      <label>Superförmåga<select name="abilityId" defaultValue={profile.abilityId??""}><option value="">Ingen superförmåga</option>{abilities.map((ability)=><option key={ability.id} value={ability.id}>{ability.name}</option>)}</select></label>
+      <button className="button dark full" disabled={busy}>Spara spelegenskaper</button>
+    </form>
   </Modal>;
 }
 

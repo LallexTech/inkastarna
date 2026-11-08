@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { readLeague } from "@/lib/league-store";
 import { summarizeStarRatings } from "@/lib/star-ratings";
 import type { League } from "@/lib/types";
+import abilities from "../../../../shared/arena-abilities.json";
 import { z } from "zod";
 
 const positions = z.enum(["Målvakt", "Back", "Mittfältare", "Anfallare", "Allround"]);
@@ -13,11 +14,13 @@ const lineup = z.object({ type: z.literal("lineup"), matchId: z.number().int().p
 const teamLeader = z.object({ type: z.literal("teamLeader"), playerId: z.string().min(1), enabled: z.boolean() });
 const teamAdmin = z.object({ type: z.literal("teamAdmin"), playerId: z.string().min(1), enabled: z.boolean() });
 const rosterPlayer = z.object({ type: z.literal("rosterPlayer"), playerId: z.string().optional(), name: z.string().trim().min(1).max(80), number: z.number().int().min(1).max(99).nullable(), position: positions });
+const abilityIds = new Set(abilities.map((ability) => ability.id));
+const rosterGameProfile = z.object({ type: z.literal("rosterGameProfile"), playerId: z.string().min(1), speed: z.number().int().min(1).max(5), acceleration: z.number().int().min(1).max(5), size: z.number().int().min(1).max(5), tackling: z.number().int().min(1).max(5), abilityId: z.string().nullable().refine((id) => id === null || abilityIds.has(id)) });
 const stats = z.object({ type: z.literal("stats"), matchId: z.number().int().positive(), playerId: z.string(), goals: z.number().int().min(0).max(100), assists: z.number().int().min(0).max(100), played: z.boolean() });
 const presence = z.object({ type: z.literal("presence"), matchId: z.number().int().positive(), players: z.array(z.object({ playerId: z.string().min(1), status: z.enum(["played", "spectator", "absent"]) })).max(100) });
 const friendlyMatch = z.object({ type: z.literal("friendlyMatch"), matchId: z.number().int().positive().optional(), opponent: z.string().trim().min(1).max(100), startsAt: z.string().datetime(), homeScore:z.number().int().min(0).max(100).nullable().optional(), awayScore:z.number().int().min(0).max(100).nullable().optional(), includeInStats:z.boolean().default(false) });
 const deleteFriendlyMatch = z.object({type:z.literal("deleteFriendlyMatch"),matchId:z.number().int().positive()});
-const schema = z.discriminatedUnion("type", [attendance, profile, lineup, teamLeader, teamAdmin, rosterPlayer, stats, presence, friendlyMatch, deleteFriendlyMatch]);
+const schema = z.discriminatedUnion("type", [attendance, profile, lineup, teamLeader, teamAdmin, rosterPlayer, rosterGameProfile, stats, presence, friendlyMatch, deleteFriendlyMatch]);
 
 export async function GET(request: Request) {
   const session = await auth.api.getSession({ headers: request.headers });
@@ -25,7 +28,7 @@ export async function GET(request: Request) {
   const snapshot=await db.query("SELECT data FROM league_snapshot WHERE id=1");
   const league=snapshot.rows[0]?.data as League|undefined;
   const [players, responses, lineups, teamLeads, teamAdmins, friendlies, presences, ballots, ratings, motms, currentPlayer, playerMatchStats] = await Promise.all([
-    db.query(`SELECT r.id, r.display_name AS name, r.user_id IS NOT NULL AS "hasAccount", r.user_id, u.email, rp.number, COALESCE(rp.position,p.position,'Allround') AS position, (rp.photo IS NOT NULL) AS "hasPhoto", COALESCE(s.goals,0)::int AS goals, COALESCE(s.assists,0)::int AS assists, COALESCE(s.appearances,0)::int AS appearances, (ta.user_id IS NOT NULL) AS admin FROM roster r LEFT JOIN "user" u ON u.id=r.user_id LEFT JOIN roster_profile rp ON rp.player_id=r.id LEFT JOIN player_profile p ON p.user_id=r.user_id LEFT JOIN team_admin ta ON ta.user_id=r.user_id LEFT JOIN (SELECT ps.player_id,SUM(ps.goals)::int goals,SUM(ps.assists)::int assists,COUNT(*) FILTER(WHERE ps.played)::int appearances FROM player_stats ps LEFT JOIN friendly_match fm ON fm.id=ps.match_id WHERE fm.id IS NULL OR fm.include_in_stats GROUP BY ps.player_id) s ON s.player_id=r.id ORDER BY r.display_name`),
+    db.query(`SELECT r.id, r.display_name AS name, r.user_id IS NOT NULL AS "hasAccount", r.user_id, u.email, rp.number, COALESCE(rp.position,p.position,'Allround') AS position, (rp.photo IS NOT NULL) AS "hasPhoto", COALESCE(s.goals,0)::int AS goals, COALESCE(s.assists,0)::int AS assists, COALESCE(s.appearances,0)::int AS appearances, (ta.user_id IS NOT NULL) AS admin, COALESCE(gp.speed,3)::int AS "gameSpeed", COALESCE(gp.acceleration,3)::int AS "gameAcceleration", COALESCE(gp.size,3)::int AS "gameSize", COALESCE(gp.tackling,3)::int AS "gameTackling", gp.ability_id AS "gameAbilityId" FROM roster r LEFT JOIN "user" u ON u.id=r.user_id LEFT JOIN roster_profile rp ON rp.player_id=r.id LEFT JOIN roster_game_profile gp ON gp.player_id=r.id LEFT JOIN player_profile p ON p.user_id=r.user_id LEFT JOIN team_admin ta ON ta.user_id=r.user_id LEFT JOIN (SELECT ps.player_id,SUM(ps.goals)::int goals,SUM(ps.assists)::int assists,COUNT(*) FILTER(WHERE ps.played)::int appearances FROM player_stats ps LEFT JOIN friendly_match fm ON fm.id=ps.match_id WHERE fm.id IS NULL OR fm.include_in_stats GROUP BY ps.player_id) s ON s.player_id=r.id ORDER BY r.display_name`),
     db.query('SELECT a.match_id AS "matchId", a.user_id AS "userId", r.id AS "playerId", u.name, a.status FROM attendance a JOIN "user" u ON u.id=a.user_id LEFT JOIN roster r ON r.user_id=a.user_id'),
     db.query('SELECT match_id AS "matchId", slots, formation FROM lineup'),
     db.query("SELECT r.id FROM team_leader tl JOIN roster r ON r.user_id=tl.user_id"),
@@ -60,7 +63,7 @@ export async function GET(request: Request) {
   }
   const friendlyMatches = friendlies.rows.map((m) => ({ id:m.id, startsAt:new Date(m.startsAt).toISOString(), location:"Träningsmatch", finished:true, home:"Inkastarna", away:m.opponent, homeId:27757, awayId:0, homeScore:m.homeScore===null?null:Number(m.homeScore), awayScore:m.awayScore===null?null:Number(m.awayScore), friendly:true, includeInStats:Boolean(m.includeInStats) }));
   return Response.json({
-    players: players.rows.map(({ user_id, email, hasPhoto, ...p }) => ({ ...p, rootAdmin:isAdmin(email ?? ""), admin:Boolean(p.admin || isAdmin(email ?? "")), photoUrl:hasPhoto ? `/api/player-photo?id=${encodeURIComponent(p.id)}` : null })),
+    players: players.rows.map(({ user_id, email, hasPhoto, gameSpeed, gameAcceleration, gameSize, gameTackling, gameAbilityId, ...p }) => ({ ...p, gameProfile:{speed:gameSpeed,acceleration:gameAcceleration,size:gameSize,tackling:gameTackling,abilityId:gameAbilityId}, rootAdmin:isAdmin(email ?? ""), admin:Boolean(p.admin || isAdmin(email ?? "")), photoUrl:hasPhoto ? `/api/player-photo?id=${encodeURIComponent(p.id)}` : null })),
     attendance:responses.rows, lineups:lineups.rows, teamLeads:teamLeads.rows.map((r)=>r.id), teamAdmins:teamAdmins.rows.map((r)=>r.id), admin, leader,
     ...(admin ? { inviteCode:process.env.TEAM_JOIN_CODE } : {}), userId:session.user.id, playerId:currentPlayer.rows[0]?.id ?? null,
     friendlyMatches, matchPresence:presences.rows, ballots:ballots.rows, ratings:matchRatings.map((r)=>({...r,average:r.average === null ? null : Math.max(3,r.average)})),
@@ -82,6 +85,11 @@ export async function POST(request: Request) {
     const player=await db.query("SELECT id FROM roster WHERE user_id=$1",[session.user.id]);
     if (!player.rowCount) return Response.json({error:"Kontot är inte kopplat till en spelarprofil."},{status:404});
     await db.query("INSERT INTO roster_profile(player_id,number,position) VALUES($1,$2,$3) ON CONFLICT(player_id) DO UPDATE SET number=$2,position=$3,updated_at=now()",[player.rows[0].id,data.number,data.position]);
+  } else if (data.type === "rosterGameProfile") {
+    if (!leader) return Response.json({error:"Bara lagledare kan ändra spelegenskaper."},{status:403});
+    const player=await db.query("SELECT id FROM roster WHERE id=$1",[data.playerId]);
+    if (!player.rowCount) return Response.json({error:"Spelaren finns inte."},{status:404});
+    await db.query("INSERT INTO roster_game_profile(player_id,speed,acceleration,size,tackling,ability_id) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(player_id) DO UPDATE SET speed=$2,acceleration=$3,size=$4,tackling=$5,ability_id=$6,updated_at=now()",[data.playerId,data.speed,data.acceleration,data.size,data.tackling,data.abilityId]);
   } else if (data.type === "rosterPlayer") {
     if (!admin) return Response.json({error:"Bara administratörer kan ändra truppen."},{status:403});
     const duplicate=await db.query("SELECT id FROM roster WHERE lower(COALESCE(display_name,name))=lower($1) AND ($2::text IS NULL OR id<>$2)",[data.name,data.playerId ?? null]);
