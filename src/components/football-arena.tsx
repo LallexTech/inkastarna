@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Copy, Gamepad2, LogOut, Play, RefreshCw, Users } from "lucide-react";
 
 type BodyType = "small" | "medium" | "large";
-type GamePlayer = { id: string; name: string; avatarUrl?: string | null; team: number; bodyType?: BodyType; x: number; y: number; knocked?: boolean; sliding?: boolean; slideX?: number; slideY?: number; tackleReadyAt?: number; connected: boolean };
+type GamePlayer = { id: string; name: string; avatarUrl?: string | null; team: number; bodyType?: BodyType; x: number; y: number; knocked?: boolean; sliding?: boolean; slideX?: number; slideY?: number; tackleReadyAt?: number; charged?: boolean; chargeUntil?: number; chargeReadyAt?: number; confused?: boolean; connected: boolean };
 type GameState = {
   type: "state";
   phase: "lobby" | "playing" | "finished";
@@ -16,9 +16,11 @@ type GameState = {
   players: GamePlayer[];
 };
 type OpenRoom = { roomId: string; phase: "lobby" | "playing"; players: number; connected: number };
-type InputState = { x: number; y: number; shot: boolean; heel: boolean };
+type InputState = { x: number; y: number };
+type ActionRequests = { shot: boolean; heel: boolean; charge: boolean; tackle: boolean };
 
-const blankInput = (): InputState => ({ x: 0, y: 0, shot: false, heel: false });
+const blankInput = (): InputState => ({ x: 0, y: 0 });
+const blankActions = (): ActionRequests => ({ shot: false, heel: false, charge: false, tackle: false });
 const bodyTypes: { id: BodyType; label: string; detail: string }[] = [
   { id: "small", label: "Liten", detail: "Snabb · 1 s cooldown" },
   { id: "medium", label: "Mellan", detail: "Balanserad · 2 s" },
@@ -38,8 +40,8 @@ export default function FootballArena({ playerId }: { playerId: string | null })
   const socketRef = useRef<WebSocket | null>(null);
   const inputRef = useRef<InputState>(blankInput());
   const touchRef = useRef<InputState>(blankInput());
+  const actionRequestsRef = useRef<ActionRequests>(blankActions());
   const keySetRef = useRef(new Set<string>());
-  const tackleRequestRef = useRef(false);
 
   useEffect(() => {
     const queryRoom = new URLSearchParams(window.location.search).get("room")?.toUpperCase() ?? "";
@@ -67,7 +69,9 @@ export default function FootballArena({ playerId }: { playerId: string | null })
 
   const send = useCallback((event: Record<string, unknown>) => {
     const socket = socketRef.current;
-    if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(event));
+    if (socket?.readyState !== WebSocket.OPEN) return false;
+    socket.send(JSON.stringify(event));
+    return true;
   }, []);
 
   useEffect(() => {
@@ -148,15 +152,16 @@ export default function FootballArena({ playerId }: { playerId: string | null })
       const current = gameRef.current;
       if (!current || current.phase !== "playing") return;
       const input = inputRef.current;
-      send({
+      const actions = actionRequestsRef.current;
+      if (send({
         type: "input",
         x: input.x,
         y: input.y,
-        shot: input.shot,
-        heel: input.heel,
-        tackle: tackleRequestRef.current,
-      });
-      tackleRequestRef.current = false;
+        shot: actions.shot,
+        heel: actions.heel,
+        tackle: actions.tackle,
+        charge: actions.charge,
+      })) actionRequestsRef.current = blankActions();
     }, 100);
     return () => {
       stopped = true;
@@ -167,7 +172,7 @@ export default function FootballArena({ playerId }: { playerId: string | null })
       inputRef.current = blankInput();
       keySetRef.current.clear();
       touchRef.current = blankInput();
-      tackleRequestRef.current = false;
+      actionRequestsRef.current = blankActions();
     };
   }, [roomId, send]);
 
@@ -179,8 +184,6 @@ export default function FootballArena({ playerId }: { playerId: string | null })
       inputRef.current = {
         x: touchRef.current.x || keyboardX,
         y: touchRef.current.y || keyboardY,
-        shot: touchRef.current.shot || keys.has(" "),
-        heel: touchRef.current.heel || keys.has("f"),
       };
     };
     const down = (event: KeyboardEvent) => {
@@ -190,17 +193,27 @@ export default function FootballArena({ playerId }: { playerId: string | null })
       const key = event.key.toLowerCase();
       if (key === "shift") {
         event.preventDefault();
-        if (!event.repeat) tackleRequestRef.current = true;
+        if (!event.repeat) actionRequestsRef.current.tackle = true;
         return;
       }
-      if (["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright", " ", "f"].includes(key)) {
+      if (key === "e") {
+        event.preventDefault();
+        if (!event.repeat) actionRequestsRef.current.charge = true;
+        return;
+      }
+      if (key === " " || key === "f") {
+        event.preventDefault();
+        if (!event.repeat) actionRequestsRef.current[key === " " ? "shot" : "heel"] = true;
+        return;
+      }
+      if (["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(key)) {
         event.preventDefault();
         keySetRef.current.add(key);
         update();
       }
     };
     const up = (event: KeyboardEvent) => { keySetRef.current.delete(event.key.toLowerCase()); update(); };
-    const clear = () => { keySetRef.current.clear(); touchRef.current = blankInput(); tackleRequestRef.current = false; update(); };
+    const clear = () => { keySetRef.current.clear(); touchRef.current = blankInput(); update(); };
     const visibility = () => { if (document.hidden) clear(); };
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
@@ -278,6 +291,16 @@ export default function FootballArena({ playerId }: { playerId: string | null })
             context.lineWidth = 3; context.strokeStyle = "#ffe08a"; context.stroke();
             context.fillStyle = "#ffe08a"; context.font = "700 18px Arial"; context.fillText("✦", point.x + radius + 3, point.y - radius);
           }
+          if (player.charged) {
+            context.beginPath(); context.arc(point.x, point.y, radius + 6, 0, Math.PI * 2);
+            context.lineWidth = 2; context.strokeStyle = "#9cff71"; context.stroke();
+            context.fillStyle = "#d7ff91"; context.font = "700 17px Arial"; context.textAlign = "center";
+            context.fillText("⚡", point.x, point.y + radius + 17);
+          } else if (player.confused) {
+            context.fillStyle = "#ffe08a"; context.font = "700 21px Arial"; context.textAlign = "center";
+            context.fillText("✦", point.x + radius - 1, point.y - radius - 1);
+            context.font = "700 11px Arial"; context.fillText("?", point.x + radius + 7, point.y - radius - 10);
+          }
           context.fillStyle = "#fff"; context.font = "600 12px Arial"; context.textAlign = "center"; context.textBaseline = "alphabetic";
           context.fillText(player.name.slice(0, 15), point.x, point.y - radius - 9);
         }
@@ -340,19 +363,17 @@ export default function FootballArena({ playerId }: { playerId: string | null })
     inputRef.current = {
       x: touchRef.current.x || keyboardX,
       y: touchRef.current.y || keyboardY,
-      shot: touchRef.current.shot || keys.has(" "),
-      heel: touchRef.current.heel || keys.has("f"),
     };
   };
+  const requestAction = (action: keyof ActionRequests) => { actionRequestsRef.current[action] = true; };
   const sendStart = () => send({ type: "start" });
   const sendRematch = () => send({ type: "rematch" });
   const isHost = game?.hostId === playerId;
   const canStart = (game?.players.filter((player) => player.connected).length ?? 0) >= 2;
   const localPlayer = game?.players.find((player) => player.id === playerId);
   const tackleRemainingMs = Math.max(0, (localPlayer?.tackleReadyAt ?? 0) - Date.now());
-  const requestTackle = () => {
-    if (gameRef.current?.phase === "playing") tackleRequestRef.current = true;
-  };
+  const chargeRemainingMs = Math.max(0, (localPlayer?.chargeUntil ?? 0) - Date.now());
+  const chargeRestMs = Math.max(0, (localPlayer?.chargeReadyAt ?? 0) - Date.now());
 
   return (
     <div className="arena-layout">
@@ -395,7 +416,7 @@ export default function FootballArena({ playerId }: { playerId: string | null })
               <>
                 <div className="arena-score"><span>RÖDA {game.score[0]}</span><strong>{Math.ceil(game.remainingMs / 60000)}:{String(Math.floor(game.remainingMs / 1000) % 60).padStart(2, "0")}</strong><span>{game.score[1]} BLÅA</span></div>
                 <canvas id="arena-canvas" className="arena-canvas" aria-label="Fotbollsplan. Styr med joysticken eller WASD. Skjut med knappen eller mellanslag, klacka med knappen eller F och glidtackla med knappen eller Shift." />
-                <div className="arena-controls"><span className="arena-keyboard-hint"><b>WASD / pilar</b> rör dig · <b>mellanslag</b> skjut · <b>F</b> klack · <b>Shift</b> glidtackla</span><MobileControls press={press} onTackle={requestTackle} tackleRemainingMs={tackleRemainingMs} /></div>
+                <div className="arena-controls"><span className="arena-keyboard-hint"><b>WASD / pilar</b> rör dig · <b>mellanslag</b> skjut · <b>F</b> klack · <b>E</b> charge · <b>Shift</b> glidtackla</span><MobileControls press={press} onAction={requestAction} tackleRemainingMs={tackleRemainingMs} chargeRemainingMs={chargeRemainingMs} chargeRestMs={chargeRestMs} /></div>
               </>
             ) : (
               <div className="arena-lobby">
@@ -425,12 +446,12 @@ export default function FootballArena({ playerId }: { playerId: string | null })
         )}
         {!roomId && error && <div className="arena-error" role="status">{error}</div>}
       </section>
-      <section className="panel arena-help"><div className="panel-heading"><h2>Så spelar ni</h2><Gamepad2 size={21} /></div><ul><li>På mobil: styr med joysticken och tryck <b>GLIDTACKLA</b>.</li><li>Tacklingen glider framåt i styrd eller senast vald riktning. Träffar den en spelare eller bollen ger den en slumpmässig knuff bakåt.</li><li>Efter glidet låses rörelsen i en halv sekund. Cooldownen beror på kroppstyp: 1, 2 eller 3 sekunder.</li><li><b>Liten</b> springer snabbt; <b>stor</b> är långsammare men tacklar hårdare; <b>mellan</b> är balanserad.</li><li>På dator: WASD eller pilar, mellanslag för skott, F för klack och Shift för glidtackling.</li><li>Öppna rum syns direkt i listan här och kan anslutas med ett tryck.</li></ul></section>
+      <section className="panel arena-help"><div className="panel-heading"><h2>Så spelar ni</h2><Gamepad2 size={21} /></div><ul><li>På mobil: styr med joysticken. SKJUT och KLACK registreras som separata tryck även om bollen inte är precis intill.</li><li><b>CHARGE</b> ger 4 sekunders fartökning följt av 4 sekunders vila. En laddad spelare syns med grön ring och blixt.</li><li>En glidtackling som träffar en spelare som inte är laddad gör spelaren långsammare i 3 sekunder och visar en förvirringsstjärna.</li><li>Tacklingen glider framåt i styrd eller senast vald riktning och ger en slumpmässig knuff vid träff. Efter glidet låses rörelsen en halv sekund. Cooldownen beror på kroppstyp: 1, 2 eller 3 sekunder.</li><li><b>Liten</b> springer snabbt; <b>stor</b> är långsammare men tacklar hårdare; <b>mellan</b> är balanserad.</li><li>På dator: WASD eller pilar, mellanslag för skott, F för klack, E för charge och Shift för glidtackling.</li><li>Öppna rum syns direkt i listan här och kan anslutas med ett tryck.</li></ul></section>
     </div>
   );
 }
 
-function MobileControls({ press, onTackle, tackleRemainingMs }: { press: (patch: Partial<InputState>) => void; onTackle: () => void; tackleRemainingMs: number }) {
+function MobileControls({ press, onAction, tackleRemainingMs, chargeRemainingMs, chargeRestMs }: { press: (patch: Partial<InputState>) => void; onAction: (action: keyof ActionRequests) => void; tackleRemainingMs: number; chargeRemainingMs: number; chargeRestMs: number }) {
   const [stick, setStick] = useState({ x: 0, y: 0 });
   const joystick = useRef<HTMLDivElement>(null);
   const updateStick = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -447,10 +468,8 @@ function MobileControls({ press, onTackle, tackleRemainingMs }: { press: (patch:
   };
   const releaseStick = () => { setStick({ x: 0, y: 0 }); press({ x: 0, y: 0 }); };
   const action = (key: "shot" | "heel") => ({
-    onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); press({ [key]: true }); },
-    onPointerUp: () => press({ [key]: false }),
-    onPointerCancel: () => press({ [key]: false }),
-    onLostPointerCapture: () => press({ [key]: false }),
+    onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => { event.preventDefault(); onAction(key); },
+    onClick: (event: React.MouseEvent<HTMLButtonElement>) => { event.preventDefault(); if (event.detail === 0) onAction(key); },
   });
   return <div className="arena-touch" aria-label="Touchkontroller">
     <div ref={joystick} className="arena-joystick" role="application" aria-label="Rörelsejoystick"
@@ -462,7 +481,10 @@ function MobileControls({ press, onTackle, tackleRemainingMs }: { press: (patch:
     <div className="arena-action-buttons">
       <button className="arena-heel" {...action("heel")}>KLACK</button>
       <button className="arena-kick" {...action("shot")}>SKJUT</button>
-      <button className="arena-tackle" onClick={onTackle} disabled={tackleRemainingMs > 0} aria-label={tackleRemainingMs > 0 ? `Tacklingen laddar om i ${Math.ceil(tackleRemainingMs / 1000)} sekunder` : "Glidtackla"}>
+      <button className="arena-charge" onPointerDown={(event) => { event.preventDefault(); if (chargeRemainingMs <= 0 && chargeRestMs <= 0) onAction("charge"); }} onClick={(event) => { event.preventDefault(); if (event.detail === 0 && chargeRemainingMs <= 0 && chargeRestMs <= 0) onAction("charge"); }} disabled={chargeRemainingMs > 0 || chargeRestMs > 0} aria-label={chargeRemainingMs > 0 ? `Charge aktiv i ${Math.ceil(chargeRemainingMs / 1000)} sekunder` : chargeRestMs > 0 ? `Charge vilar i ${Math.ceil(chargeRestMs / 1000)} sekunder` : "Öka farten med charge"}>
+        {chargeRemainingMs > 0 ? `SPRINT · ${Math.ceil(chargeRemainingMs / 1000)} s` : chargeRestMs > 0 ? `VILA · ${Math.ceil(chargeRestMs / 1000)} s` : "CHARGE · 4 s"}
+      </button>
+      <button className="arena-tackle" onClick={() => onAction("tackle")} disabled={tackleRemainingMs > 0} aria-label={tackleRemainingMs > 0 ? `Tacklingen laddar om i ${Math.ceil(tackleRemainingMs / 1000)} sekunder` : "Glidtackla"}>
         {tackleRemainingMs > 0 ? `LADDAR · ${Math.ceil(tackleRemainingMs / 1000)} s` : "GLIDTACKLA"}
       </button>
     </div>

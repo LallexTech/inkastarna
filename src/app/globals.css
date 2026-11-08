@@ -1712,9 +1712,9 @@ tr.highlight td {
   box-shadow: 0 3px 10px #0005;
   pointer-events: none;
 }
-.arena-action-buttons { display: grid; gap: 10px; justify-items: end; }
+.arena-action-buttons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; justify-items: stretch; }
 .arena-action-buttons button {
-  min-width: 92px;
+  min-width: 0;
   min-height: 54px;
   padding: 0 12px;
   border: 1px solid #ffffff4d;
@@ -1727,6 +1727,8 @@ tr.highlight td {
 }
 .arena-action-buttons .arena-kick { background: linear-gradient(145deg,#202522,#111); }
 .arena-action-buttons .arena-heel { background: linear-gradient(145deg,#d88431,#a85320); }
+.arena-action-buttons .arena-charge { border: 2px solid #b4f58a; background: linear-gradient(145deg,#4b9a40,#28723d); color: #f4ffe9; font-size: 9px; letter-spacing: .25px; white-space: nowrap; }
+.arena-action-buttons .arena-charge:disabled { opacity: .62; filter: saturate(.55); }
 .arena-action-buttons .arena-tackle { min-height: 60px; border: 2px solid #ffdeb0; border-radius: 19px; background: linear-gradient(145deg,#ed9e40,#c74c37); color: #fff; font-size: 10px; letter-spacing: .4px; }
 .arena-action-buttons .arena-tackle:disabled { opacity: .55; filter: saturate(.4); }
 .arena-action-buttons button:active { transform: scale(.96); }
@@ -2590,8 +2592,9 @@ tr.highlight td {
   }
   .arena-joystick { width: min(126px, 34vw); height: min(126px, 34vw); justify-self: start; }
   .arena-joystick-knob { width: 43%; height: 43%; }
-  .arena-action-buttons { justify-self: end; }
-  .arena-action-buttons button { min-width: min(100px, 28vw); min-height: 52px; }
+  .arena-action-buttons { justify-self: end; width: 100%; }
+  .arena-action-buttons button { min-width: 0; min-height: 48px; padding-inline: 5px; font-size: 9px; }
+  .arena-action-buttons .arena-tackle { min-height: 50px; font-size: 8px; }
   .arena-canvas { max-height: min(48vh, 330px); }
   .sidebar {
     transform: translateX(-100%);
