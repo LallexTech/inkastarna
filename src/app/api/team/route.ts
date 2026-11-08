@@ -26,7 +26,7 @@ export async function GET(request: Request) {
   const league=snapshot.rows[0]?.data as League|undefined;
   const [players, responses, lineups, teamLeads, teamAdmins, friendlies, presences, ballots, ratings, motms, currentPlayer, playerMatchStats] = await Promise.all([
     db.query(`SELECT r.id, r.display_name AS name, r.user_id IS NOT NULL AS "hasAccount", r.user_id, u.email, rp.number, COALESCE(rp.position,p.position,'Allround') AS position, (rp.photo IS NOT NULL) AS "hasPhoto", COALESCE(s.goals,0)::int AS goals, COALESCE(s.assists,0)::int AS assists, COALESCE(s.appearances,0)::int AS appearances, (ta.user_id IS NOT NULL) AS admin FROM roster r LEFT JOIN "user" u ON u.id=r.user_id LEFT JOIN roster_profile rp ON rp.player_id=r.id LEFT JOIN player_profile p ON p.user_id=r.user_id LEFT JOIN team_admin ta ON ta.user_id=r.user_id LEFT JOIN (SELECT ps.player_id,SUM(ps.goals)::int goals,SUM(ps.assists)::int assists,COUNT(*) FILTER(WHERE ps.played)::int appearances FROM player_stats ps LEFT JOIN friendly_match fm ON fm.id=ps.match_id WHERE fm.id IS NULL OR fm.include_in_stats GROUP BY ps.player_id) s ON s.player_id=r.id ORDER BY r.display_name`),
-    db.query('SELECT a.match_id AS "matchId", a.user_id AS "userId", u.name, a.status FROM attendance a JOIN "user" u ON u.id=a.user_id'),
+    db.query('SELECT a.match_id AS "matchId", a.user_id AS "userId", r.id AS "playerId", u.name, a.status FROM attendance a JOIN "user" u ON u.id=a.user_id LEFT JOIN roster r ON r.user_id=a.user_id'),
     db.query('SELECT match_id AS "matchId", slots, formation FROM lineup'),
     db.query("SELECT r.id FROM team_leader tl JOIN roster r ON r.user_id=tl.user_id"),
     db.query("SELECT r.id FROM team_admin ta JOIN roster r ON r.user_id=ta.user_id"),
@@ -170,9 +170,15 @@ export async function POST(request: Request) {
     await db.query("INSERT INTO attendance(match_id,user_id,status) VALUES($1,$2,$3) ON CONFLICT(match_id,user_id) DO UPDATE SET status=$3,updated_at=now()",[data.matchId,session.user.id,data.status]);
   } else {
     if (!leader) return Response.json({error:"Bara lagledare kan spara laguppställningen."},{status:403});
+    const {league}=await readLeague();
+    const match=league?.matches.find((m)=>m.id===data.matchId && (m.homeId===league.teamId || m.awayId===league.teamId));
+    if (!match || match.finished || new Date(match.startsAt).getTime()<=Date.now()) return Response.json({error:"Välj en kommande match i lagets spelschema."},{status:404});
     const ids=data.slots.filter((x):x is string=>x!==null);
     if (new Set(ids).size!==ids.length) return Response.json({error:"En spelare kan bara ha en plats."},{status:400});
-    if (ids.length) { const users=await db.query("SELECT id FROM roster WHERE id=ANY($1::text[])",[ids]); if (users.rowCount!==ids.length) return Response.json({error:"Spelaren finns inte i truppen."},{status:400}); }
+    const eligible=ids.length ? await db.query("SELECT r.id,COALESCE(rp.position,p.position,'Allround') AS position FROM roster r LEFT JOIN roster_profile rp ON rp.player_id=r.id LEFT JOIN player_profile p ON p.user_id=r.user_id WHERE r.id=ANY($1::text[]) AND EXISTS(SELECT 1 FROM attendance a WHERE a.match_id=$2 AND a.user_id=r.user_id AND a.status='yes')",[ids,data.matchId]) : {rows:[],rowCount:0};
+    if (eligible.rowCount!==ids.length) return Response.json({error:"Alla spelare i uppställningen måste ha svarat Kommer på matchen."},{status:400});
+    const positions=new Map(eligible.rows.map((player)=>[player.id,player.position]));
+    if (data.slots.some((playerId,index)=>playerId!==null && (index===4 ? positions.get(playerId)!=="Målvakt" : positions.get(playerId)==="Målvakt"))) return Response.json({error:"Målvakter placeras i mål och utespelare på planen."},{status:400});
     await db.query("INSERT INTO lineup(match_id,slots,formation,updated_by) VALUES($1,$2,$3,$4) ON CONFLICT(match_id) DO UPDATE SET slots=$2,formation=$3,updated_by=$4,updated_at=now()",[data.matchId,JSON.stringify(data.slots),data.formation,session.user.id]);
   }
   return Response.json({ok:true});
