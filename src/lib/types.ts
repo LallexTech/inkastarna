@@ -47,7 +47,10 @@ export type Player = {
   photoUrl?: string | null;
   admin?: boolean;
   rootAdmin?: boolean;
+  gameProfile: GameProfile;
 };
+export type GameAbilityId = "allahbakar" | "muslimen" | "storhetsvansinne" | "frigolit" | "lang-som-fan" | "rom-och-cola" | "vanster-langside-runkare" | "taljes-harigaste" | "stekare" | "kaggen" | "alltid-varm" | "alltid-tvaa" | "nyvaken" | "hoger-trafo";
+export type GameProfile = { speed: number; acceleration: number; size: number; tackling: number; abilityId: GameAbilityId | null };
 export type Attendance = {
   matchId: number;
   userId: string;
