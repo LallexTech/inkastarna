@@ -6,6 +6,18 @@ const GAME_LENGTH = 5 * 60 * 1000;
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname === "/rooms" && request.method === "GET") {
+      const origin = request.headers.get("Origin");
+      if (!originAllowed(origin, env.APP_ORIGINS)) return new Response("Forbidden", { status: 403 });
+      const directory = env.ROOM_DIRECTORY.get(env.ROOM_DIRECTORY.idFromName("global"));
+      const response = await directory.fetch("https://directory.internal/rooms");
+      return new Response(response.body, { status: response.status, headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store",
+        "Access-Control-Allow-Origin": origin,
+        "Vary": "Origin",
+      } });
+    }
     const match = url.pathname.match(/^\/room\/([A-HJ-NP-Z2-9]{6})\/ws$/);
     if (!match || request.method !== "GET") return new Response("Not found", { status: 404 });
     if (!originAllowed(request.headers.get("Origin"), env.APP_ORIGINS)) return new Response("Forbidden", { status: 403 });
@@ -31,6 +43,7 @@ export class GameRoom {
     this.lastTick = 0;
     this.lastPersist = 0;
     this.tickCount = 0;
+    this.lastDirectoryPublish = 0;
     this.ready = state.blockConcurrencyWhile(async () => {
       this.game = await state.storage.get("game") || emptyGame();
     });
@@ -53,11 +66,12 @@ export class GameRoom {
       this.game.players.push({
         id: identity.playerId,
         name: identity.name.slice(0, 60),
+        avatarUrl: typeof identity.avatarUrl === "string" && identity.avatarUrl.startsWith("/api/player-photo?id=") ? identity.avatarUrl : null,
         team,
         x: team === 0 ? 220 : WIDTH - 220,
         y: 150 + (teamCounts[team] % 4) * 100,
         vx: 0, vy: 0,
-        input: { x: 0, y: 0, kick: false },
+        input: { x: 0, y: 0, shot: false, heel: false },
         facingX: identity.playerId ? 1 : 0,
         facingY: 0,
         disconnectedAt: null,
@@ -65,6 +79,7 @@ export class GameRoom {
       if (!this.game.hostId) this.game.hostId = identity.playerId;
     } else {
       existing.name = identity.name.slice(0, 60);
+      existing.avatarUrl = typeof identity.avatarUrl === "string" && identity.avatarUrl.startsWith("/api/player-photo?id=") ? identity.avatarUrl : null;
       existing.disconnectedAt = null;
     }
     if (!this.game.hostId) this.game.hostId = identity.playerId;
@@ -77,6 +92,7 @@ export class GameRoom {
     this.state.acceptWebSocket(server);
     server.serializeAttachment({ playerId: identity.playerId, messageWindow: Date.now(), messageCount: 0 });
     await this.persist();
+    await this.publishRoom(true);
     this.scheduleExpiry();
     this.startLoop();
     this.broadcast();
@@ -108,7 +124,7 @@ export class GameRoom {
       const x = Number(event.x);
       const y = Number(event.y);
       if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-      player.input = { x: clamp(x, -1, 1), y: clamp(y, -1, 1), kick: event.kick === true };
+      player.input = { x: clamp(x, -1, 1), y: clamp(y, -1, 1), shot: event.shot === true || event.kick === true, heel: event.heel === true };
       if (player.input.x || player.input.y) {
         const length = Math.hypot(player.input.x, player.input.y) || 1;
         player.facingX = player.input.x / length;
@@ -124,6 +140,7 @@ export class GameRoom {
       this.game.lastKickBy = null;
       this.startLoop();
       await this.persist();
+      await this.publishRoom(true);
       this.broadcast();
     } else if (event.type === "rematch" && player.id === this.game.hostId && this.game.phase === "finished") {
       this.game.score = [0, 0];
@@ -131,6 +148,7 @@ export class GameRoom {
       this.game.remainingMs = GAME_LENGTH;
       this.resetPositions();
       await this.persist();
+      await this.publishRoom(true);
       this.broadcast();
     }
   }
@@ -149,7 +167,7 @@ export class GameRoom {
     const player = this.game.players.find((entry) => entry.id === playerId);
     const stillConnected = this.activeSockets().some((candidate) => candidate !== socket && candidate.deserializeAttachment()?.playerId === playerId);
     if (player && !stillConnected) {
-      player.input = { x: 0, y: 0, kick: false };
+      player.input = { x: 0, y: 0, shot: false, heel: false };
       player.disconnectedAt = Date.now();
       if (player.id === this.game.hostId) {
         const online = new Set(this.activeSockets().filter((candidate) => candidate !== socket).map((candidate) => candidate.deserializeAttachment()?.playerId));
@@ -161,6 +179,7 @@ export class GameRoom {
     }
     if (!this.activeSockets().length) this.stopLoop();
     await this.persist();
+    await this.publishRoom(true);
     this.broadcast();
   }
 
@@ -193,7 +212,9 @@ export class GameRoom {
       this.game.phase = "finished";
       this.stopLoop();
       finished = true;
+      void this.publishRoom(true);
     }
+    else if (now - this.lastDirectoryPublish > 5000) void this.publishRoom();
     this.tickCount++;
     if (finished || this.tickCount % 3 === 0) this.broadcast();
     if (now - this.lastPersist > 1000) {
@@ -217,39 +238,91 @@ export class GameRoom {
       player.y = clamp(player.y + player.vy * dt, 24, HEIGHT - 24);
     }
 
-    for (let a = 0; a < players.length; a++) for (let b = a + 1; b < players.length; b++) {
-      const one = players[a]; const two = players[b];
-      const dx = two.x - one.x; const dy = two.y - one.y;
-      const distance = Math.hypot(dx, dy) || 0.001;
-      if (distance < 34) {
-        const shift = (34 - distance) / 2;
-        one.x = clamp(one.x - dx / distance * shift, 24, WIDTH - 24);
-        one.y = clamp(one.y - dy / distance * shift, 24, HEIGHT - 24);
-        two.x = clamp(two.x + dx / distance * shift, 24, WIDTH - 24);
-        two.y = clamp(two.y + dy / distance * shift, 24, HEIGHT - 24);
+    // Cheap solver passes keep crowded groups from ending a tick overlapped.
+    for (let pass = 0; pass < 12; pass++) {
+      for (let a = 0; a < players.length; a++) for (let b = a + 1; b < players.length; b++) {
+        const one = players[a]; const two = players[b];
+        const dx = two.x - one.x; const dy = two.y - one.y;
+        const distance = Math.hypot(dx, dy);
+        if (distance < 38) {
+          const nx = distance > 0.001 ? dx / distance : (a + b) % 2 ? 1 : -1;
+          const ny = distance > 0.001 ? dy / distance : 0;
+          const shift = (38 - distance) / 2;
+          one.x = clamp(one.x - nx * shift, 24, WIDTH - 24);
+          one.y = clamp(one.y - ny * shift, 24, HEIGHT - 24);
+          two.x = clamp(two.x + nx * shift, 24, WIDTH - 24);
+          two.y = clamp(two.y + ny * shift, 24, HEIGHT - 24);
+        }
       }
     }
 
     const ball = this.game.ball;
+    ball.x += ball.vx * dt;
+    ball.y += ball.vy * dt;
     for (const player of players) {
       const dx = ball.x - player.x; const dy = ball.y - player.y;
-      if (dx * dx + dy * dy < 30 * 30) {
-        ball.vx += player.vx * dt * 1.1;
-        ball.vy += player.vy * dt * 1.1;
-        if (player.input.kick && !player.wasKicking) {
+      const distance = Math.hypot(dx, dy);
+      if (distance < 30) {
+        const nx = distance > 0.001 ? dx / distance : (player.team === 0 ? 1 : -1);
+        const ny = distance > 0.001 ? dy / distance : 0;
+        const correction = 30 - distance + 0.01;
+        ball.x += nx * correction * 0.72;
+        ball.y += ny * correction * 0.72;
+        player.x = clamp(player.x - nx * correction * 0.28, 24, WIDTH - 24);
+        player.y = clamp(player.y - ny * correction * 0.28, 24, HEIGHT - 24);
+        const relativeSpeed = (ball.vx - player.vx) * nx + (ball.vy - player.vy) * ny;
+        if (relativeSpeed < 0) {
+          const impulse = -relativeSpeed * 1.35;
+          ball.vx += impulse * nx;
+          ball.vy += impulse * ny;
+        }
+        const shooting = player.input.shot && !player.wasShooting;
+        const heeling = player.input.heel && !player.wasHeeling;
+        if (heeling || shooting) {
+          const direction = heeling ? -1 : 1;
           const directionX = player.input.x || player.facingX || (player.team === 0 ? 1 : -1);
           const directionY = player.input.y || player.facingY;
           const length = Math.hypot(directionX, directionY) || 1;
-          ball.vx = directionX / length * 520;
-          ball.vy = directionY / length * 520;
+          ball.vx = directionX / length * 520 * direction;
+          ball.vy = directionY / length * 520 * direction;
           this.game.lastKickBy = player.id;
         }
       }
-      player.wasKicking = player.input.kick;
+      player.wasShooting = player.input.shot;
+      player.wasHeeling = player.input.heel;
     }
 
-    ball.x += ball.vx * dt;
-    ball.y += ball.vy * dt;
+    // Resolve player and ball contacts together so a ball cannot get wedged between players.
+    for (let pass = 0; pass < 12; pass++) {
+      for (let a = 0; a < players.length; a++) for (let b = a + 1; b < players.length; b++) {
+        const one = players[a]; const two = players[b];
+        const dx = two.x - one.x; const dy = two.y - one.y;
+        const distance = Math.hypot(dx, dy);
+        if (distance < 38) {
+          const nx = distance > 0.001 ? dx / distance : (a + b) % 2 ? 1 : -1;
+          const ny = distance > 0.001 ? dy / distance : 0;
+          const shift = (38 - distance) / 2;
+          one.x = clamp(one.x - nx * shift, 24, WIDTH - 24);
+          one.y = clamp(one.y - ny * shift, 24, HEIGHT - 24);
+          two.x = clamp(two.x + nx * shift, 24, WIDTH - 24);
+          two.y = clamp(two.y + ny * shift, 24, HEIGHT - 24);
+        }
+      }
+      for (const player of players) {
+        const dx = ball.x - player.x; const dy = ball.y - player.y;
+        const distance = Math.hypot(dx, dy);
+        if (distance < 30) {
+          const nx = distance > 0.001 ? dx / distance : (player.team === 0 ? 1 : -1);
+          const ny = distance > 0.001 ? dy / distance : 0;
+          const correction = 30 - distance + 0.01;
+          ball.x += nx * correction * 0.72;
+          ball.y += ny * correction * 0.72;
+          player.x = clamp(player.x - nx * correction * 0.28, 24, WIDTH - 24);
+          player.y = clamp(player.y - ny * correction * 0.28, 24, HEIGHT - 24);
+        }
+      }
+    }
+
     const friction = Math.pow(0.982, dt * 30);
     ball.vx *= friction; ball.vy *= friction;
     if (ball.y < 14 || ball.y > HEIGHT - 14) {
@@ -276,8 +349,9 @@ export class GameRoom {
       player.x = WIDTH / 2 + direction * (150 + Math.floor(index / 3) * 80);
       player.y = 170 + (index % 3) * 130;
       player.vx = 0; player.vy = 0;
-      player.input = { x: 0, y: 0, kick: false };
-      player.wasKicking = false;
+      player.input = { x: 0, y: 0, shot: false, heel: false };
+      player.wasShooting = false;
+      player.wasHeeling = false;
     }
     this.game.ball = { x: WIDTH / 2, y: HEIGHT / 2, vx: 0, vy: 0 };
   }
@@ -292,7 +366,7 @@ export class GameRoom {
       score: this.game.score,
       remainingMs: this.game.remainingMs,
       ball: this.game.ball,
-      players: this.game.players.map(({ id, name, team, x, y }) => ({ id, name, team, x, y, connected: connected.has(id) })),
+      players: this.game.players.map(({ id, name, avatarUrl, team, x, y }) => ({ id, name, avatarUrl, team, x, y, connected: connected.has(id) })),
     };
   }
 
@@ -319,6 +393,61 @@ export class GameRoom {
     this.stopLoop();
     for (const socket of this.activeSockets()) socket.close(4000, "Rummet har gått ut.");
     await this.state.storage.deleteAll();
+    const directory = this.env.ROOM_DIRECTORY.get(this.env.ROOM_DIRECTORY.idFromName("global"));
+    await directory.fetch("https://directory.internal/update", { method: "POST", body: JSON.stringify({ roomId: this.game.roomId, remove: true }) });
+  }
+
+  async publishRoom(force = false) {
+    const now = Date.now();
+    if (!this.game.roomId || (!force && now - this.lastDirectoryPublish < 5000)) return;
+    this.lastDirectoryPublish = now;
+    const connected = new Set(this.activeSockets().map((socket) => socket.deserializeAttachment()?.playerId));
+    const room = {
+      roomId: this.game.roomId,
+      phase: this.game.phase,
+      players: this.game.players.length,
+      connected: connected.size,
+      updatedAt: now,
+    };
+    const directory = this.env.ROOM_DIRECTORY.get(this.env.ROOM_DIRECTORY.idFromName("global"));
+    await directory.fetch("https://directory.internal/update", { method: "POST", body: JSON.stringify({ room }) });
+  }
+}
+
+export class RoomDirectory {
+  constructor(state) { this.state = state; }
+
+  async fetch(request) {
+    const url = new URL(request.url);
+    if (url.pathname === "/update" && request.method === "POST") {
+      const body = await request.json().catch(() => null);
+      if (!body || typeof body.roomId !== "string" || !ROOM_CODE.test(body.roomId)) return new Response("Bad room", { status: 400 });
+      const key = `room:${body.roomId}`;
+      if (body.remove || !body.room || body.room.connected < 1 || body.room.players >= 10 || body.room.phase === "finished") {
+        await this.state.storage.delete(key);
+      } else {
+        await this.state.storage.put(key, {
+          roomId: body.roomId,
+          phase: body.room.phase === "playing" ? "playing" : "lobby",
+          players: Math.max(0, Math.min(10, Number(body.room.players) || 0)),
+          connected: Math.max(0, Math.min(10, Number(body.room.connected) || 0)),
+          updatedAt: Date.now(),
+        });
+      }
+      return new Response(null, { status: 204 });
+    }
+    if (url.pathname === "/rooms" && request.method === "GET") {
+      const rooms = await this.state.storage.list({ prefix: "room:", limit: 200 });
+      const cutoff = Date.now() - 60 * 60 * 1000;
+      const result = [];
+      for (const [key, room] of rooms) {
+        if (room.updatedAt < cutoff) await this.state.storage.delete(key);
+        else if (room.connected > 0 && room.players < 10 && room.phase !== "finished") result.push(room);
+      }
+      result.sort((a, b) => b.updatedAt - a.updatedAt);
+      return Response.json({ rooms: result });
+    }
+    return new Response("Not found", { status: 404 });
   }
 }
 

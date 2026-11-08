@@ -52,7 +52,7 @@ npm run game:deploy
 npx wrangler secret put GAME_TICKET_SECRET --config realtime/wrangler.toml
 ```
 
-Lägg Worker-adressen `wss://inkastarna-arena.inkastarna.workers.dev` i Netlifys `NEXT_PUBLIC_GAME_WS_URL` och ange samma Worker-secret i Netlifys `GAME_TICKET_SECRET` för `production`, `deploy-preview` och `branch-deploy`. `APP_ORIGINS` i `realtime/wrangler.toml` ska innehålla appens tillåtna origins. För lokal Worker-utveckling används `realtime/.dev.vars`, som inte ska checkas in. Durable Object-namespacet och dess första SQLite-migrering skapas av Wrangler-konfigurationen. Spelet använder Cloudflares kostnadsfria nivå utan automatisk uppgradering; om dess dagliga gräns nås kan nya speloperationer nekas.
+Lägg Worker-adressen `wss://inkastarna-arena.inkastarna.workers.dev` i Netlifys `NEXT_PUBLIC_GAME_WS_URL` och ange samma Worker-secret i Netlifys `GAME_TICKET_SECRET` för `production`, `deploy-preview` och `branch-deploy`. `APP_ORIGINS` i `realtime/wrangler.toml` ska innehålla appens tillåtna origins. För lokal Worker-utveckling används `realtime/.dev.vars`, som inte ska checkas in. Wrangler-konfigurationen skapar Durable Objects för spelrum och en delad katalog som visar öppna rum i arenafliken. Spelet använder Cloudflares kostnadsfria nivå utan automatisk uppgradering; om dess dagliga gräns nås kan nya speloperationer nekas.
 
 ## Kontroller
 
