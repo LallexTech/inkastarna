@@ -1727,8 +1727,8 @@ tr.highlight td {
 }
 .arena-action-buttons .arena-kick { background: linear-gradient(145deg,#202522,#111); }
 .arena-action-buttons .arena-heel { background: linear-gradient(145deg,#d88431,#a85320); }
-.arena-action-buttons .arena-charge { border: 2px solid #b4f58a; background: linear-gradient(145deg,#4b9a40,#28723d); color: #f4ffe9; font-size: 9px; letter-spacing: .25px; white-space: nowrap; }
-.arena-action-buttons .arena-charge:disabled { opacity: .62; filter: saturate(.55); }
+.arena-action-buttons .arena-sprint { border: 2px solid #b4f58a; background: linear-gradient(145deg,#4b9a40,#28723d); color: #f4ffe9; font-size: 9px; letter-spacing: .25px; white-space: nowrap; }
+.arena-action-buttons .arena-sprint:disabled { opacity: .62; filter: saturate(.55); }
 .arena-action-buttons .arena-tackle { min-height: 60px; border: 2px solid #ffdeb0; border-radius: 19px; background: linear-gradient(145deg,#ed9e40,#c74c37); color: #fff; font-size: 10px; letter-spacing: .4px; }
 .arena-action-buttons .arena-tackle:disabled { opacity: .55; filter: saturate(.4); }
 .arena-action-buttons button:active { transform: scale(.96); }
