@@ -17,10 +17,10 @@ type GameState = {
 };
 type OpenRoom = { roomId: string; phase: "lobby" | "playing"; players: number; connected: number };
 type InputState = { x: number; y: number };
-type ActionRequests = { shot: boolean; heel: boolean; charge: boolean; tackle: boolean };
+type ActionRequests = { shot: boolean; heel: boolean; sprint: boolean; tackle: boolean };
 
 const blankInput = (): InputState => ({ x: 0, y: 0 });
-const blankActions = (): ActionRequests => ({ shot: false, heel: false, charge: false, tackle: false });
+const blankActions = (): ActionRequests => ({ shot: false, heel: false, sprint: false, tackle: false });
 const bodyTypes: { id: BodyType; label: string; detail: string }[] = [
   { id: "small", label: "Liten", detail: "Snabb · 1 s cooldown" },
   { id: "medium", label: "Mellan", detail: "Balanserad · 2 s" },
@@ -160,7 +160,7 @@ export default function FootballArena({ playerId }: { playerId: string | null })
         shot: actions.shot,
         heel: actions.heel,
         tackle: actions.tackle,
-        charge: actions.charge,
+        sprint: actions.sprint,
       })) actionRequestsRef.current = blankActions();
     }, 100);
     return () => {
@@ -198,7 +198,7 @@ export default function FootballArena({ playerId }: { playerId: string | null })
       }
       if (key === "e") {
         event.preventDefault();
-        if (!event.repeat) actionRequestsRef.current.charge = true;
+        if (!event.repeat) actionRequestsRef.current.sprint = true;
         return;
       }
       if (key === " " || key === "f") {
@@ -296,10 +296,9 @@ export default function FootballArena({ playerId }: { playerId: string | null })
             context.lineWidth = 2; context.strokeStyle = "#9cff71"; context.stroke();
             context.fillStyle = "#d7ff91"; context.font = "700 17px Arial"; context.textAlign = "center";
             context.fillText("⚡", point.x, point.y + radius + 17);
-          } else if (player.confused) {
-            context.fillStyle = "#ffe08a"; context.font = "700 21px Arial"; context.textAlign = "center";
-            context.fillText("✦", point.x + radius - 1, point.y - radius - 1);
-            context.font = "700 11px Arial"; context.fillText("?", point.x + radius + 7, point.y - radius - 10);
+          }
+          if (player.confused) {
+            drawConfusionBadge(context, point.x + radius + 8, point.y - radius - 7);
           }
           context.fillStyle = "#fff"; context.font = "600 12px Arial"; context.textAlign = "center"; context.textBaseline = "alphabetic";
           context.fillText(player.name.slice(0, 15), point.x, point.y - radius - 9);
@@ -373,8 +372,8 @@ export default function FootballArena({ playerId }: { playerId: string | null })
   const canStart = connectedPlayers >= 1;
   const localPlayer = game?.players.find((player) => player.id === playerId);
   const tackleRemainingMs = Math.max(0, (localPlayer?.tackleReadyAt ?? 0) - Date.now());
-  const chargeRemainingMs = Math.max(0, (localPlayer?.chargeUntil ?? 0) - Date.now());
-  const chargeRestMs = Math.max(0, (localPlayer?.chargeReadyAt ?? 0) - Date.now());
+  const sprintRemainingMs = Math.max(0, (localPlayer?.chargeUntil ?? 0) - Date.now());
+  const sprintRestMs = Math.max(0, (localPlayer?.chargeReadyAt ?? 0) - Date.now());
 
   return (
     <div className="arena-layout">
@@ -411,7 +410,7 @@ export default function FootballArena({ playerId }: { playerId: string | null })
               <>
                 <div className="arena-score"><span>RÖDA {game.score[0]}</span><strong>{Math.ceil(game.remainingMs / 60000)}:{String(Math.floor(game.remainingMs / 1000) % 60).padStart(2, "0")}</strong><span>{game.score[1]} BLÅA</span></div>
                 <canvas id="arena-canvas" className="arena-canvas" aria-label="Fotbollsplan. Styr med joysticken eller WASD. Skjut med knappen eller mellanslag, klacka med knappen eller F och glidtackla med knappen eller Shift." />
-                <div className="arena-controls"><span className="arena-keyboard-hint"><b>WASD / pilar</b> rör dig · <b>mellanslag</b> skjut · <b>F</b> klack · <b>E</b> charge · <b>Shift</b> glidtackla</span><MobileControls press={press} onAction={requestAction} tackleRemainingMs={tackleRemainingMs} chargeRemainingMs={chargeRemainingMs} chargeRestMs={chargeRestMs} /></div>
+                <div className="arena-controls"><span className="arena-keyboard-hint"><b>WASD / pilar</b> rör dig · <b>mellanslag</b> skjut · <b>F</b> klack · <b>E</b> sprint · <b>Shift</b> charge / glidtackla</span><MobileControls press={press} onAction={requestAction} tackleRemainingMs={tackleRemainingMs} sprintRemainingMs={sprintRemainingMs} sprintRestMs={sprintRestMs} /></div>
               </>
             ) : (
               <div className="arena-lobby">
@@ -441,7 +440,7 @@ export default function FootballArena({ playerId }: { playerId: string | null })
         )}
         {!roomId && error && <div className="arena-error" role="status">{error}</div>}
       </section>
-      <section className="panel arena-help"><div className="panel-heading"><h2>Så spelar ni</h2><Gamepad2 size={21} /></div><ul><li>På mobil: styr med joysticken. SKJUT och KLACK registreras som separata tryck även om bollen inte är precis intill.</li><li><b>CHARGE</b> ger 4 sekunders fartökning följt av 4 sekunders vila. En laddad spelare syns med grön ring och blixt.</li><li>En glidtackling som träffar en spelare som inte är laddad gör spelaren långsammare i 3 sekunder och visar en förvirringsstjärna.</li><li>Starta själv med en stillastående testspelare; den försvinner när en lagkamrat går med.</li><li>Tacklingen glider framåt i styrd eller senast vald riktning och ger en slumpmässig knuff vid träff. Efter glidet låses rörelsen en halv sekund. Cooldownen beror på kroppstyp: 1, 2 eller 3 sekunder.</li><li><b>Liten</b> springer snabbt; <b>stor</b> är långsammare men tacklar hårdare; <b>mellan</b> är balanserad.</li><li>På dator: WASD eller pilar, mellanslag för skott, F för klack, E för charge och Shift för glidtackling.</li><li>Öppna rum syns direkt i listan här och kan anslutas med ett tryck.</li></ul></section>
+      <section className="panel arena-help"><div className="panel-heading"><h2>Så spelar ni</h2><Gamepad2 size={21} /></div><ul><li>På mobil: styr med joysticken. SKJUT och KLACK registreras som separata tryck även om bollen inte är precis intill.</li><li><b>SPRINT</b> ger 4 sekunders fartökning följt av 4 sekunders vila. En sprintande spelare syns med grön ring och blixt.</li><li><b>CHARGE / GLIDTACKLA</b> kastar dig framåt i styrd riktning och knuffar spelare eller boll vid träff. En mindre spelare som tacklar en större kan förvirra den i högst 1 sekund; en större tacklare kan orsaka längre förvirring.</li><li>Starta själv med en stillastående testspelare; den försvinner när en lagkamrat går med.</li><li>Efter glidet låses rörelsen en halv sekund. Tacklingens cooldown beror på kroppstyp: 1, 2 eller 3 sekunder.</li><li><b>Liten</b> springer snabbt; <b>stor</b> är långsammare men tacklar hårdare; <b>mellan</b> är balanserad.</li><li>På dator: WASD eller pilar, mellanslag för skott, F för klack, E för sprint och Shift för charge / glidtackling.</li><li>Öppna rum syns direkt i listan här och kan anslutas med ett tryck.</li></ul></section>
     </div>
   );
 }
@@ -457,7 +456,32 @@ function OpenRoomsList({ rooms, canJoin, onJoin }: { rooms: OpenRoom[]; canJoin:
   </div>;
 }
 
-function MobileControls({ press, onAction, tackleRemainingMs, chargeRemainingMs, chargeRestMs }: { press: (patch: Partial<InputState>) => void; onAction: (action: keyof ActionRequests) => void; tackleRemainingMs: number; chargeRemainingMs: number; chargeRestMs: number }) {
+function drawConfusionBadge(context: CanvasRenderingContext2D, x: number, y: number) {
+  const outer = 11;
+  const inner = 5;
+  context.beginPath();
+  for (let point = 0; point < 10; point++) {
+    const angle = -Math.PI / 2 + point * Math.PI / 5;
+    const radius = point % 2 === 0 ? outer : inner;
+    const px = x + Math.cos(angle) * radius;
+    const py = y + Math.sin(angle) * radius;
+    if (point === 0) context.moveTo(px, py);
+    else context.lineTo(px, py);
+  }
+  context.closePath();
+  context.fillStyle = "#ffe08a";
+  context.strokeStyle = "#523c13";
+  context.lineWidth = 2;
+  context.fill();
+  context.stroke();
+  context.fillStyle = "#523c13";
+  context.font = "800 12px Arial";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillText("?", x, y + 1);
+}
+
+function MobileControls({ press, onAction, tackleRemainingMs, sprintRemainingMs, sprintRestMs }: { press: (patch: Partial<InputState>) => void; onAction: (action: keyof ActionRequests) => void; tackleRemainingMs: number; sprintRemainingMs: number; sprintRestMs: number }) {
   const [stick, setStick] = useState({ x: 0, y: 0 });
   const joystick = useRef<HTMLDivElement>(null);
   const updateStick = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -487,11 +511,11 @@ function MobileControls({ press, onAction, tackleRemainingMs, chargeRemainingMs,
     <div className="arena-action-buttons">
       <button className="arena-heel" {...action("heel")}>KLACK</button>
       <button className="arena-kick" {...action("shot")}>SKJUT</button>
-      <button className="arena-charge" onPointerDown={(event) => { event.preventDefault(); if (chargeRemainingMs <= 0 && chargeRestMs <= 0) onAction("charge"); }} onClick={(event) => { event.preventDefault(); if (event.detail === 0 && chargeRemainingMs <= 0 && chargeRestMs <= 0) onAction("charge"); }} disabled={chargeRemainingMs > 0 || chargeRestMs > 0} aria-label={chargeRemainingMs > 0 ? `Charge aktiv i ${Math.ceil(chargeRemainingMs / 1000)} sekunder` : chargeRestMs > 0 ? `Charge vilar i ${Math.ceil(chargeRestMs / 1000)} sekunder` : "Öka farten med charge"}>
-        {chargeRemainingMs > 0 ? `SPRINT · ${Math.ceil(chargeRemainingMs / 1000)} s` : chargeRestMs > 0 ? `VILA · ${Math.ceil(chargeRestMs / 1000)} s` : "CHARGE · 4 s"}
+      <button className="arena-sprint" onPointerDown={(event) => { event.preventDefault(); if (sprintRemainingMs <= 0 && sprintRestMs <= 0) onAction("sprint"); }} onClick={(event) => { event.preventDefault(); if (event.detail === 0 && sprintRemainingMs <= 0 && sprintRestMs <= 0) onAction("sprint"); }} disabled={sprintRemainingMs > 0 || sprintRestMs > 0} aria-label={sprintRemainingMs > 0 ? `Sprint aktiv i ${Math.ceil(sprintRemainingMs / 1000)} sekunder` : sprintRestMs > 0 ? `Sprint vilar i ${Math.ceil(sprintRestMs / 1000)} sekunder` : "Öka farten med sprint"}>
+        {sprintRemainingMs > 0 ? `SPRINT · ${Math.ceil(sprintRemainingMs / 1000)} s` : sprintRestMs > 0 ? `VILA · ${Math.ceil(sprintRestMs / 1000)} s` : "SPRINT · 4 s"}
       </button>
-      <button className="arena-tackle" onClick={() => onAction("tackle")} disabled={tackleRemainingMs > 0} aria-label={tackleRemainingMs > 0 ? `Tacklingen laddar om i ${Math.ceil(tackleRemainingMs / 1000)} sekunder` : "Glidtackla"}>
-        {tackleRemainingMs > 0 ? `LADDAR · ${Math.ceil(tackleRemainingMs / 1000)} s` : "GLIDTACKLA"}
+      <button className="arena-tackle" onPointerDown={(event) => { event.preventDefault(); if (tackleRemainingMs <= 0) onAction("tackle"); }} onClick={(event) => { event.preventDefault(); if (event.detail === 0 && tackleRemainingMs <= 0) onAction("tackle"); }} disabled={tackleRemainingMs > 0} aria-label={tackleRemainingMs > 0 ? `Charge laddar om i ${Math.ceil(tackleRemainingMs / 1000)} sekunder` : "Charge / glidtackla"}>
+        {tackleRemainingMs > 0 ? `LADDAR · ${Math.ceil(tackleRemainingMs / 1000)} s` : "CHARGE / GLID"}
       </button>
     </div>
   </div>;
