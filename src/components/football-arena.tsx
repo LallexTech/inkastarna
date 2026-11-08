@@ -265,11 +265,7 @@ export default function FootballArena({ playerId }: { playerId: string | null })
           point.y += (player.y - point.y) * 0.28;
           displayed.set(player.id, point);
           const radius = player.bodyType === "small" ? 16 : player.bodyType === "large" ? 22 : 19;
-          if (player.sliding) {
-            context.beginPath(); context.moveTo(point.x - (player.slideX ?? 0) * (radius + 25), point.y - (player.slideY ?? 0) * (radius + 25));
-            context.lineTo(point.x - (player.slideX ?? 0) * radius, point.y - (player.slideY ?? 0) * radius);
-            context.strokeStyle = "#ffe08a"; context.lineWidth = radius * 0.55; context.lineCap = "round"; context.stroke();
-          }
+          if (player.sliding) drawTackleTrail(context, point.x, point.y, radius, player.slideX ?? 0, player.slideY ?? 0);
           let avatar = player.avatarUrl ? avatars.get(player.id) : undefined;
           if (player.avatarUrl && !avatar) {
             avatar = new Image(); avatar.src = player.avatarUrl; avatars.set(player.id, avatar);
@@ -289,7 +285,7 @@ export default function FootballArena({ playerId }: { playerId: string | null })
           if (player.knocked) {
             context.beginPath(); context.arc(point.x, point.y, radius + 7, 0, Math.PI * 2);
             context.lineWidth = 3; context.strokeStyle = "#ffe08a"; context.stroke();
-            context.fillStyle = "#ffe08a"; context.font = "700 18px Arial"; context.fillText("✦", point.x + radius + 3, point.y - radius);
+            drawImpactBurst(context, point.x, point.y, radius);
           }
           if (player.charged) {
             context.beginPath(); context.arc(point.x, point.y, radius + 6, 0, Math.PI * 2);
@@ -479,6 +475,65 @@ function drawConfusionBadge(context: CanvasRenderingContext2D, x: number, y: num
   context.textAlign = "center";
   context.textBaseline = "middle";
   context.fillText("?", x, y + 1);
+}
+
+function drawTackleTrail(context: CanvasRenderingContext2D, x: number, y: number, radius: number, directionX: number, directionY: number) {
+  const length = Math.hypot(directionX, directionY) || 1;
+  const dx = directionX / length;
+  const dy = directionY / length;
+  const sideX = -dy;
+  const sideY = dx;
+  const tail = radius + 54;
+  const head = radius * 0.45;
+
+  context.save();
+  context.globalAlpha = 0.85;
+  context.beginPath();
+  context.ellipse(x, y, radius + 14, radius * 0.78, Math.atan2(dy, dx), 0, Math.PI * 2);
+  context.fillStyle = "rgba(255, 193, 82, .28)";
+  context.fill();
+  context.strokeStyle = "#fff0b1";
+  context.lineWidth = 3;
+  context.stroke();
+
+  context.lineCap = "round";
+  for (const offset of [-radius * 0.55, 0, radius * 0.55]) {
+    context.beginPath();
+    context.moveTo(x - dx * tail + sideX * offset, y - dy * tail + sideY * offset);
+    context.lineTo(x - dx * head + sideX * offset, y - dy * head + sideY * offset);
+    context.strokeStyle = offset === 0 ? "#fffef0" : "#ffe08a";
+    context.lineWidth = offset === 0 ? 5 : 3;
+    context.stroke();
+  }
+  const arrowX = x + dx * (radius + 13);
+  const arrowY = y + dy * (radius + 13);
+  context.beginPath();
+  context.moveTo(arrowX + dx * 12, arrowY + dy * 12);
+  context.lineTo(arrowX - dx * 7 + sideX * 8, arrowY - dy * 7 + sideY * 8);
+  context.lineTo(arrowX - dx * 7 - sideX * 8, arrowY - dy * 7 - sideY * 8);
+  context.closePath();
+  context.fillStyle = "#fff8d7";
+  context.fill();
+  context.restore();
+}
+
+function drawImpactBurst(context: CanvasRenderingContext2D, x: number, y: number, radius: number) {
+  const pulse = 0.72 + Math.sin(performance.now() / 35) * 0.28;
+  context.save();
+  context.globalAlpha = pulse;
+  context.strokeStyle = "#fff1b4";
+  context.lineWidth = 3;
+  context.lineCap = "round";
+  for (let spoke = 0; spoke < 8; spoke++) {
+    const angle = -Math.PI / 2 + spoke * Math.PI / 4;
+    const inner = radius + 10;
+    const outer = radius + 18 + (spoke % 2) * 4;
+    context.beginPath();
+    context.moveTo(x + Math.cos(angle) * inner, y + Math.sin(angle) * inner);
+    context.lineTo(x + Math.cos(angle) * outer, y + Math.sin(angle) * outer);
+    context.stroke();
+  }
+  context.restore();
 }
 
 function MobileControls({ press, onAction, tackleRemainingMs, sprintRemainingMs, sprintRestMs }: { press: (patch: Partial<InputState>) => void; onAction: (action: keyof ActionRequests) => void; tackleRemainingMs: number; sprintRemainingMs: number; sprintRestMs: number }) {
