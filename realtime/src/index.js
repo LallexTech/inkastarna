@@ -304,7 +304,7 @@ export class GameRoom {
       const directionLength = Math.hypot(directionX, directionY) || 1;
       player.tackleDirX = directionX / directionLength;
       player.tackleDirY = directionY / directionLength;
-      player.tackleSlideUntil = now + 300;
+      player.tackleSlideUntil = now + 420;
       player.stunnedUntil = now + 800;
       player.tackleCooldownUntil = now + stats.cooldownMs;
       player.tackleHitPlayer = false;
@@ -348,7 +348,6 @@ export class GameRoom {
         attacker.knockbackX = Math.cos(attackerAngle) * 190;
         attacker.knockbackY = Math.sin(attackerAngle) * 190;
         attacker.tackleHitPlayer = true;
-        attacker.tackleSlideUntil = now;
         attacker.stunnedUntil = now + 500;
         target.stunnedUntil = now + 500;
         break;
@@ -387,7 +386,6 @@ export class GameRoom {
       const clearDistance = bodyStats(player).radius + 12;
       player.x = clamp(ball.x + player.tackleDirX * clearDistance, 24, WIDTH - 24);
       player.y = clamp(ball.y + player.tackleDirY * clearDistance, 24, HEIGHT - 24);
-      player.tackleSlideUntil = now;
       player.stunnedUntil = now + 500;
       player.tackleHitBall = true;
     }
