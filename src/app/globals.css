@@ -1719,6 +1719,7 @@ tr.highlight td {
 }
 .arena-action-buttons .arena-kick { background: linear-gradient(145deg,#202522,#111); }
 .arena-action-buttons .arena-heel { background: linear-gradient(145deg,#d88431,#a85320); }
+.arena-action-buttons .arena-charge { min-height: 42px; border-radius: 14px; background: linear-gradient(145deg,#437b52,#245c37); }
 .arena-action-buttons button:active { transform: scale(.96); }
 .arena-help ul {
   margin: 0;
