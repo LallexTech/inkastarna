@@ -1,0 +1,16 @@
+[
+  { "id": "allahbakar", "name": "Allahbakar", "description": "Alla tvingas tillbaka till sin egen planhalva." },
+  { "id": "muslimen", "name": "Muslimen", "description": "Överladdning följd av energikrasch." },
+  { "id": "storhetsvansinne", "name": "Storhetsvansinne", "description": "Berserk styrka och motknuffar." },
+  { "id": "frigolit", "name": "Frigolit", "description": "Snabb acceleration, men flyger lättare." },
+  { "id": "lang-som-fan", "name": "Lång som fan", "description": "Blir lång och får större räckvidd." },
+  { "id": "rom-och-cola", "name": "Rom och cola", "description": "Fartboost följd av inverterad styrning." },
+  { "id": "vanster-langside-runkare", "name": "Vänster långside runkare", "description": "Extrem fart längs vänsterkanten." },
+  { "id": "taljes-harigaste", "name": "Täljes hårigaste", "description": "Spelare fastnar i en följande klunga." },
+  { "id": "stekare", "name": "Stekare", "description": "Bättre skott, klackar och bollskydd." },
+  { "id": "kaggen", "name": "Kaggen", "description": "Blir bred och tacklar hårt, sedan långsam." },
+  { "id": "alltid-varm", "name": "Alltid varm", "description": "Sprint utan vilopaus." },
+  { "id": "alltid-tvaa", "name": "Alltid tvåa", "description": "Fartboost när du jagar bollen." },
+  { "id": "nyvaken", "name": "Nyvaken", "description": "Vaknar till efter en kort trög start." },
+  { "id": "hoger-trafo", "name": "Höger träfot", "description": "Spelets högsta fart med andningsstopp." }
+]

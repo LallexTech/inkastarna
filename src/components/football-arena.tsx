@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Copy, Gamepad2, LogOut, Play, RefreshCw, Users } from "lucide-react";
+import type { Player } from "@/lib/types";
+import abilities from "../../shared/arena-abilities.json";
 
-type BodyType = "small" | "medium" | "large";
-type GamePlayer = { id: string; name: string; avatarUrl?: string | null; team: number; bodyType?: BodyType; x: number; y: number; knocked?: boolean; sliding?: boolean; slideX?: number; slideY?: number; tackleReadyAt?: number; charged?: boolean; chargeUntil?: number; chargeReadyAt?: number; confused?: boolean; testPlayer?: boolean; connected: boolean };
+type AbilityId = typeof abilities[number]["id"];
+type GamePlayer = { id: string; characterId: string; name: string; avatarUrl?: string | null; team: number; gameProfile: Player["gameProfile"]; x: number; y: number; facingX?: number; facingY?: number; knocked?: boolean; sliding?: boolean; slideX?: number; slideY?: number; tackleReadyAt?: number; charged?: boolean; chargeUntil?: number; chargeReadyAt?: number; confused?: boolean; testPlayer?: boolean; connected: boolean; abilityReadyAt?: number; abilityUntil?: number; abilityState?: AbilityId | null; retreating?: boolean; sticky?: boolean; panting?: boolean; afterEffectId?: string | null; afterEffectUntil?: number; afterEffectActive?: boolean };
 type GameState = {
   type: "state";
   phase: "lobby" | "playing" | "finished";
@@ -17,18 +19,13 @@ type GameState = {
 };
 type OpenRoom = { roomId: string; phase: "lobby" | "playing"; players: number; connected: number };
 type InputState = { x: number; y: number };
-type ActionRequests = { shot: boolean; heel: boolean; sprint: boolean; tackle: boolean };
+type ActionRequests = { shot: boolean; heel: boolean; sprint: boolean; tackle: boolean; super: boolean };
 
 const blankInput = (): InputState => ({ x: 0, y: 0 });
-const blankActions = (): ActionRequests => ({ shot: false, heel: false, sprint: false, tackle: false });
-const bodyTypes: { id: BodyType; label: string; detail: string }[] = [
-  { id: "small", label: "Liten", detail: "Snabb · 1 s cooldown" },
-  { id: "medium", label: "Mellan", detail: "Balanserad · 2 s" },
-  { id: "large", label: "Stor", detail: "Tung tackling · 3 s" },
-];
+const blankActions = (): ActionRequests => ({ shot: false, heel: false, sprint: false, tackle: false, super: false });
 const roomPattern = /^[A-HJ-NP-Z2-9]{6}$/;
 
-export default function FootballArena({ playerId }: { playerId: string | null }) {
+export default function FootballArena({ playerId, players }: { playerId: string | null; players: Player[] }) {
   const [roomId, setRoomId] = useState("");
   const [roomDraft, setRoomDraft] = useState("");
   const [game, setGame] = useState<GameState | null>(null);
@@ -36,12 +33,15 @@ export default function FootballArena({ playerId }: { playerId: string | null })
   const [connection, setConnection] = useState<"idle" | "connecting" | "connected" | "reconnecting">("idle");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [selectedCharacterId, setSelectedCharacterId] = useState(playerId ?? "");
   const gameRef = useRef<GameState | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
   const inputRef = useRef<InputState>(blankInput());
   const touchRef = useRef<InputState>(blankInput());
   const actionRequestsRef = useRef<ActionRequests>(blankActions());
   const keySetRef = useRef(new Set<string>());
+
+  useEffect(() => { if (playerId && !selectedCharacterId) setSelectedCharacterId(playerId); }, [playerId, selectedCharacterId]);
 
   useEffect(() => {
     const queryRoom = new URLSearchParams(window.location.search).get("room")?.toUpperCase() ?? "";
@@ -89,6 +89,12 @@ export default function FootballArena({ playerId }: { playerId: string | null })
       if (stopped) return;
       setConnection(retry ? "reconnecting" : "connecting");
       try {
+        let characterIdToUse = selectedCharacterId || playerId;
+        try {
+          const savedCharacterId = sessionStorage.getItem(`inkastarna-character:${roomId}`);
+          if (savedCharacterId && savedCharacterId.length <= 100) characterIdToUse = savedCharacterId;
+        } catch { /* Storage is optional; fall back to the signed-in player's profile. */ }
+        if (characterIdToUse && characterIdToUse !== selectedCharacterId) setSelectedCharacterId(characterIdToUse);
         const workerUrl = process.env.NEXT_PUBLIC_GAME_WS_URL;
         const allowedProtocol = workerUrl && (/^wss:\/\//.test(workerUrl) || (process.env.NODE_ENV !== "production" && /^ws:\/\//.test(workerUrl)));
         if (!workerUrl || !allowedProtocol) {
@@ -99,7 +105,7 @@ export default function FootballArena({ playerId }: { playerId: string | null })
         const response = await fetch("/api/game-ticket", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ roomId }),
+          body: JSON.stringify({ roomId, characterId: characterIdToUse }),
           cache: "no-store",
         });
         const data = await response.json();
@@ -161,6 +167,7 @@ export default function FootballArena({ playerId }: { playerId: string | null })
         heel: actions.heel,
         tackle: actions.tackle,
         sprint: actions.sprint,
+        super: actions.super,
       })) actionRequestsRef.current = blankActions();
     }, 100);
     return () => {
@@ -174,7 +181,7 @@ export default function FootballArena({ playerId }: { playerId: string | null })
       touchRef.current = blankInput();
       actionRequestsRef.current = blankActions();
     };
-  }, [roomId, send]);
+  }, [roomId, selectedCharacterId, playerId, send]);
 
   useEffect(() => {
     const update = () => {
@@ -199,6 +206,11 @@ export default function FootballArena({ playerId }: { playerId: string | null })
       if (key === "e") {
         event.preventDefault();
         if (!event.repeat) actionRequestsRef.current.sprint = true;
+        return;
+      }
+      if (key === "q") {
+        event.preventDefault();
+        if (!event.repeat) actionRequestsRef.current.super = true;
         return;
       }
       if (key === " " || key === "f") {
@@ -264,28 +276,37 @@ export default function FootballArena({ playerId }: { playerId: string | null })
           point.x += (player.x - point.x) * 0.28;
           point.y += (player.y - point.y) * 0.28;
           displayed.set(player.id, point);
-          const radius = player.bodyType === "small" ? 16 : player.bodyType === "large" ? 22 : 19;
+          const radius = 12 + player.gameProfile.size * 2;
+          const long = player.abilityState === "lang-som-fan" && (player.abilityUntil ?? 0) > Date.now();
+          const wide = player.abilityState === "kaggen" && (player.abilityUntil ?? 0) > Date.now();
+          const shapeX = long ? 2 : wide ? 2 : 1;
+          const shapeY = 1;
+          const angle = long ? Math.atan2(player.facingY ?? 0, player.facingX ?? 1) : 0;
           if (player.sliding) drawTackleTrail(context, point.x, point.y, radius, player.slideX ?? 0, player.slideY ?? 0);
           let avatar = player.avatarUrl ? avatars.get(player.id) : undefined;
           if (player.avatarUrl && !avatar) {
             avatar = new Image(); avatar.src = player.avatarUrl; avatars.set(player.id, avatar);
           }
-          context.save(); context.beginPath(); context.arc(point.x, point.y, radius, 0, Math.PI * 2); context.clip();
-          context.fillStyle = player.team === 0 ? "#f25a57" : "#4ba8ff"; context.fillRect(point.x - radius, point.y - radius, radius * 2, radius * 2);
-          if (avatar?.complete && avatar.naturalWidth > 0) context.drawImage(avatar, point.x - radius, point.y - radius, radius * 2, radius * 2);
+          context.save(); context.translate(point.x, point.y); context.rotate(angle); context.beginPath(); tracePlayerShape(context, radius, shapeX, shapeY); context.clip();
+          context.fillStyle = player.team === 0 ? "#f25a57" : "#4ba8ff"; context.fillRect(-radius * shapeX, -radius * shapeY, radius * shapeX * 2, radius * shapeY * 2);
+          if (avatar?.complete && avatar.naturalWidth > 0) context.drawImage(avatar, -radius * shapeX, -radius * shapeY, radius * shapeX * 2, radius * shapeY * 2);
           else {
             const initials = player.testPlayer ? "BOT" : player.name.trim().split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase();
             context.fillStyle = "#fff"; context.font = `700 ${player.testPlayer ? 10 : 13}px Arial`; context.textAlign = "center"; context.textBaseline = "middle";
-            context.fillText(initials, point.x, point.y + 1);
+            context.fillText(initials, 0, 1);
           }
           context.restore();
           context.lineWidth = player.id === playerId ? 4 : 2;
-          context.beginPath(); context.arc(point.x, point.y, radius + 1, 0, Math.PI * 2);
+          context.save(); context.translate(point.x, point.y); context.rotate(angle); context.beginPath(); tracePlayerShape(context, radius + 1, shapeX, shapeY); context.restore();
           context.strokeStyle = player.connected ? "#fff" : "#bbb"; context.stroke();
           if (player.knocked) {
-            context.beginPath(); context.arc(point.x, point.y, radius + 7, 0, Math.PI * 2);
+            context.beginPath(); context.arc(point.x, point.y, radius * Math.max(shapeX, shapeY) + 7, 0, Math.PI * 2);
             context.lineWidth = 3; context.strokeStyle = "#ffe08a"; context.stroke();
             drawImpactBurst(context, point.x, point.y, radius);
+          }
+          if (player.abilityUntil && player.abilityUntil > Date.now()) {
+            context.beginPath(); context.arc(point.x, point.y, radius * Math.max(shapeX, shapeY) + 7, 0, Math.PI * 2);
+            context.lineWidth = 3; context.strokeStyle = player.abilityState === "muslimen" ? "#ffd35b" : "#d8a5ff"; context.stroke();
           }
           if (player.charged) {
             context.beginPath(); context.arc(point.x, point.y, radius + 6, 0, Math.PI * 2);
@@ -296,6 +317,9 @@ export default function FootballArena({ playerId }: { playerId: string | null })
           if (player.confused) {
             drawConfusionBadge(context, point.x + radius + 8, point.y - radius - 7);
           }
+          if (player.retreating) { context.fillStyle = "#fff0a6"; context.font = "800 18px Arial"; context.textAlign = "center"; context.fillText("↩", point.x, point.y - radius - 15); }
+          if (player.sticky) { context.fillStyle = "#ffdcf6"; context.font = "800 14px Arial"; context.textAlign = "center"; context.fillText("✦", point.x + radius, point.y - radius); }
+          if (player.panting) { context.fillStyle = "#fff"; context.font = "800 11px Arial"; context.textAlign = "center"; context.fillText("HÄMTAR ANDAN", point.x, point.y + radius + 15); }
           context.fillStyle = "#fff"; context.font = "600 12px Arial"; context.textAlign = "center"; context.textBaseline = "alphabetic";
           context.fillText(player.name.slice(0, 15), point.x, point.y - radius - 9);
         }
@@ -361,6 +385,10 @@ export default function FootballArena({ playerId }: { playerId: string | null })
     };
   };
   const requestAction = (action: keyof ActionRequests) => { actionRequestsRef.current[action] = true; };
+  const chooseCharacter = (characterId: string) => {
+    setSelectedCharacterId(characterId);
+    if (roomId) try { sessionStorage.setItem(`inkastarna-character:${roomId}`, characterId); } catch { /* Storage is optional; the account profile remains available. */ }
+  };
   const sendStart = () => send({ type: "start" });
   const sendRematch = () => send({ type: "rematch" });
   const isHost = game?.hostId === playerId;
@@ -370,6 +398,11 @@ export default function FootballArena({ playerId }: { playerId: string | null })
   const tackleRemainingMs = Math.max(0, (localPlayer?.tackleReadyAt ?? 0) - Date.now());
   const sprintRemainingMs = Math.max(0, (localPlayer?.chargeUntil ?? 0) - Date.now());
   const sprintRestMs = Math.max(0, (localPlayer?.chargeReadyAt ?? 0) - Date.now());
+  const superRemainingMs = Math.max(0, (localPlayer?.abilityReadyAt ?? 0) - Date.now());
+  const superActiveMs = Math.max(0, (localPlayer?.abilityUntil ?? 0) - Date.now());
+  const afterEffectRemainingMs = Math.max(0, (localPlayer?.afterEffectUntil ?? 0) - Date.now());
+  const afterEffectLabel = localPlayer?.afterEffectId === "rom-och-cola" ? "BAKIS · styrningen är inverterad" : localPlayer?.afterEffectId === "muslimen" ? "ENERGIKRASH · rörelselås" : localPlayer?.afterEffectId === "kaggen" ? "EFTERSEGT · sänkt fart" : "";
+  const selectedAbility = abilities.find((ability) => ability.id === localPlayer?.gameProfile.abilityId);
 
   return (
     <div className="arena-layout">
@@ -406,7 +439,7 @@ export default function FootballArena({ playerId }: { playerId: string | null })
               <>
                 <div className="arena-score"><span>RÖDA {game.score[0]}</span><strong>{Math.ceil(game.remainingMs / 60000)}:{String(Math.floor(game.remainingMs / 1000) % 60).padStart(2, "0")}</strong><span>{game.score[1]} BLÅA</span></div>
                 <canvas id="arena-canvas" className="arena-canvas" aria-label="Fotbollsplan. Styr med joysticken eller WASD. Skjut med knappen eller mellanslag, klacka med knappen eller F och glidtackla med knappen eller Shift." />
-                <div className="arena-controls"><span className="arena-keyboard-hint"><b>WASD / pilar</b> rör dig · <b>mellanslag</b> skjut · <b>F</b> klack · <b>E</b> sprint · <b>Shift</b> charge / glidtackla</span><MobileControls press={press} onAction={requestAction} tackleRemainingMs={tackleRemainingMs} sprintRemainingMs={sprintRemainingMs} sprintRestMs={sprintRestMs} /></div>
+                <div className="arena-controls"><span className="arena-keyboard-hint"><b>WASD / pilar</b> rör dig · <b>mellanslag</b> skjut · <b>F</b> klack · <b>E</b> sprint · <b>Shift</b> glid · <b>Q</b> super</span>{localPlayer?.afterEffectActive && <span className="arena-super-status" role="status">{afterEffectLabel} · {Math.ceil(afterEffectRemainingMs / 1000)} s</span>}<MobileControls press={press} onAction={requestAction} tackleRemainingMs={tackleRemainingMs} sprintRemainingMs={sprintRemainingMs} sprintRestMs={sprintRestMs} superRemainingMs={superRemainingMs} superName={selectedAbility?.name ?? "SUPER"} superActiveMs={superActiveMs} /></div>
               </>
             ) : (
               <div className="arena-lobby">
@@ -415,15 +448,23 @@ export default function FootballArena({ playerId }: { playerId: string | null })
                   {[0, 1].map((side) => (
                     <div className={`arena-team team-${side}`} key={side}>
                       <strong>{side === 0 ? "Röda laget" : "Blå laget"}</strong>
-                      {(game?.players ?? []).filter((player) => player.team === side).map((player) => <span key={player.id} className={!player.connected ? "offline" : ""}>{player.name}{player.testPlayer ? " · står still tills någon går med" : ` · ${bodyTypes.find((type) => type.id === player.bodyType)?.label.toLowerCase() ?? "mellan"}`}{player.id === game?.hostId ? " · värd" : ""}{!player.connected && !player.testPlayer ? " · återansluter" : ""}</span>)}
+                      {(game?.players ?? []).filter((player) => player.team === side).map((player) => <span key={player.id} className={!player.connected ? "offline" : ""}>{player.name}{player.testPlayer ? " · står still tills någon går med" : ` · fart ${player.gameProfile.speed}, storlek ${player.gameProfile.size}`}{player.id === game?.hostId ? " · värd" : ""}{!player.connected && !player.testPlayer ? " · återansluter" : ""}</span>)}
                     </div>
                   ))}
                 </div>
                 {game?.phase === "lobby" && localPlayer && <div className="arena-build-picker">
-                  <strong>Välj kroppstyp</strong><span>Kan ändras fram till matchstart.</span>
-                  <div>{bodyTypes.map((type) => <button type="button" key={type.id} className={localPlayer.bodyType === type.id ? "selected" : ""} aria-pressed={localPlayer.bodyType === type.id} onClick={() => send({ type: "bodyType", bodyType: type.id })}>
-                    <b>{type.label}</b><small>{type.detail}</small>
-                  </button>)}</div>
+                  <strong>Välj din spelare</strong><span>Varje truppspelare kan bara väljas av en deltagare i rummet.</span>
+                  <div className="character-picker">{players.map((character) => {
+                    const occupied = (game.players ?? []).some((entry) => entry.id !== playerId && entry.characterId === character.id);
+                    const chosen = selectedCharacterId === character.id;
+                    const ability = abilities.find((item) => item.id === character.gameProfile.abilityId);
+                    return <button type="button" key={character.id} className={chosen ? "selected" : ""} aria-pressed={chosen} disabled={occupied} onClick={() => chooseCharacter(character.id)}>
+                      <b>{character.name}{occupied ? " · upptagen" : chosen ? " · du" : ""}</b>
+                      <span>Fart {character.gameProfile.speed} · acceleration {character.gameProfile.acceleration}</span>
+                      <span>Storlek {character.gameProfile.size} · tackling {character.gameProfile.tackling}</span>
+                      <small>{ability?.name ?? "Ingen superförmåga"}</small>
+                    </button>;
+                  })}</div>
                 </div>}
                 {connection !== "connected" && <p className="arena-hint"><RefreshCw size={14} /> Väntar på anslutning till spelservern…</p>}
                 {game?.phase === "finished" ? <div className="arena-finish">Slutresultat: {game.score[0]}–{game.score[1]}</div> : <p className="arena-hint">{connectedPlayers === 1 ? "Testa själv mot en stillastående testspelare. Den byts ut när en lagkamrat ansluter." : "Fem minuter · balanserade lag · första spelaren blir värd"}</p>}
@@ -436,7 +477,7 @@ export default function FootballArena({ playerId }: { playerId: string | null })
         )}
         {!roomId && error && <div className="arena-error" role="status">{error}</div>}
       </section>
-      <section className="panel arena-help"><div className="panel-heading"><h2>Så spelar ni</h2><Gamepad2 size={21} /></div><ul><li>På mobil: styr med joysticken. SKJUT och KLACK registreras som separata tryck även om bollen inte är precis intill.</li><li><b>SPRINT</b> ger 4 sekunders fartökning följt av 4 sekunders vila. En sprintande spelare syns med grön ring och blixt.</li><li><b>CHARGE / GLIDTACKLA</b> kastar dig framåt i styrd riktning och knuffar spelare eller boll vid träff. En mindre spelare som tacklar en större kan förvirra den i högst 1 sekund; en större tacklare kan orsaka längre förvirring.</li><li>Starta själv med en stillastående testspelare; den försvinner när en lagkamrat går med.</li><li>Efter glidet låses rörelsen en halv sekund. Tacklingens cooldown beror på kroppstyp: 1, 2 eller 3 sekunder.</li><li><b>Liten</b> springer snabbt; <b>stor</b> är långsammare men tacklar hårdare; <b>mellan</b> är balanserad.</li><li>På dator: WASD eller pilar, mellanslag för skott, F för klack, E för sprint och Shift för charge / glidtackling.</li><li>Öppna rum syns direkt i listan här och kan anslutas med ett tryck.</li></ul></section>
+      <section className="panel arena-help"><div className="panel-heading"><h2>Så spelar ni</h2><Gamepad2 size={21} /></div><ul><li>På mobil: styr med joysticken. SKJUT och KLACK registreras som separata tryck även om bollen inte är precis intill.</li><li><b>SPRINT</b> ger 4 sekunders fartökning följt av 4 sekunders vila. En sprintande spelare syns med grön ring och blixt.</li><li><b>GLIDTACKLA</b> kastar dig framåt i styrd riktning och knuffar spelare eller boll vid träff. Storlek påverkar fart och tacklingar.</li><li>Välj en ledig truppspelare i lobbyn. Spelegenskaper och eventuell superförmåga följer med spelaren.</li><li><b>SUPER</b> aktiverar spelarens förmåga. Den laddas om i 60 sekunder; tryck Q på dator eller använd superknappen på mobilen.</li><li>Starta själv med en stillastående testspelare; den försvinner när en lagkamrat går med.</li><li>På dator: WASD eller pilar, mellanslag för skott, F för klack, E för sprint, Shift för glidtackling och Q för super.</li><li>Öppna rum syns direkt i listan här och kan anslutas med ett tryck.</li></ul></section>
     </div>
   );
 }
@@ -475,6 +516,11 @@ function drawConfusionBadge(context: CanvasRenderingContext2D, x: number, y: num
   context.textAlign = "center";
   context.textBaseline = "middle";
   context.fillText("?", x, y + 1);
+}
+
+function tracePlayerShape(context: CanvasRenderingContext2D, radius: number, scaleX: number, scaleY: number) {
+  if (scaleX > 1 || scaleY > 1) context.roundRect(-radius * scaleX, -radius * scaleY, radius * scaleX * 2, radius * scaleY * 2, radius);
+  else context.ellipse(0, 0, radius, radius, 0, 0, Math.PI * 2);
 }
 
 function drawTackleTrail(context: CanvasRenderingContext2D, x: number, y: number, radius: number, directionX: number, directionY: number) {
@@ -536,7 +582,7 @@ function drawImpactBurst(context: CanvasRenderingContext2D, x: number, y: number
   context.restore();
 }
 
-function MobileControls({ press, onAction, tackleRemainingMs, sprintRemainingMs, sprintRestMs }: { press: (patch: Partial<InputState>) => void; onAction: (action: keyof ActionRequests) => void; tackleRemainingMs: number; sprintRemainingMs: number; sprintRestMs: number }) {
+function MobileControls({ press, onAction, tackleRemainingMs, sprintRemainingMs, sprintRestMs, superRemainingMs, superName, superActiveMs }: { press: (patch: Partial<InputState>) => void; onAction: (action: keyof ActionRequests) => void; tackleRemainingMs: number; sprintRemainingMs: number; sprintRestMs: number; superRemainingMs: number; superName: string; superActiveMs: number }) {
   const [stick, setStick] = useState({ x: 0, y: 0 });
   const joystick = useRef<HTMLDivElement>(null);
   const updateStick = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -571,6 +617,9 @@ function MobileControls({ press, onAction, tackleRemainingMs, sprintRemainingMs,
       </button>
       <button className="arena-tackle" onPointerDown={(event) => { event.preventDefault(); if (tackleRemainingMs <= 0) onAction("tackle"); }} onClick={(event) => { event.preventDefault(); if (event.detail === 0 && tackleRemainingMs <= 0) onAction("tackle"); }} disabled={tackleRemainingMs > 0} aria-label={tackleRemainingMs > 0 ? `Charge laddar om i ${Math.ceil(tackleRemainingMs / 1000)} sekunder` : "Charge / glidtackla"}>
         {tackleRemainingMs > 0 ? `LADDAR · ${Math.ceil(tackleRemainingMs / 1000)} s` : "CHARGE / GLID"}
+      </button>
+      <button className="arena-super" onPointerDown={(event) => { event.preventDefault(); if (superRemainingMs <= 0 && superName !== "SUPER") onAction("super"); }} onClick={(event) => { event.preventDefault(); if (event.detail === 0 && superRemainingMs <= 0 && superName !== "SUPER") onAction("super"); }} disabled={superRemainingMs > 0 || superName === "SUPER"} aria-label={superRemainingMs > 0 ? `Super laddar om i ${Math.ceil(superRemainingMs / 1000)} sekunder` : `Använd superförmågan ${superName}`}>
+        {superActiveMs > 0 ? `${superName.toUpperCase()} · ${Math.ceil(superActiveMs / 1000)} s` : superRemainingMs > 0 ? `SUPER · ${Math.ceil(superRemainingMs / 1000)} s` : superName.toUpperCase()}
       </button>
     </div>
   </div>;
