@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Copy, Gamepad2, LogOut, Play, RefreshCw, Users } from "lucide-react";
 
-type GamePlayer = { id: string; name: string; avatarUrl?: string | null; team: number; x: number; y: number; connected: boolean };
+type GamePlayer = { id: string; name: string; avatarUrl?: string | null; team: number; x: number; y: number; knocked?: boolean; connected: boolean };
 type GameState = {
   type: "state";
   phase: "lobby" | "playing" | "finished";
@@ -15,9 +15,9 @@ type GameState = {
   players: GamePlayer[];
 };
 type OpenRoom = { roomId: string; phase: "lobby" | "playing"; players: number; connected: number };
-type InputState = { x: number; y: number; shot: boolean; heel: boolean };
+type InputState = { x: number; y: number; shot: boolean; heel: boolean; charge: boolean };
 
-const blankInput = (): InputState => ({ x: 0, y: 0, shot: false, heel: false });
+const blankInput = (): InputState => ({ x: 0, y: 0, shot: false, heel: false, charge: false });
 const roomPattern = /^[A-HJ-NP-Z2-9]{6}$/;
 
 export default function FootballArena({ playerId }: { playerId: string | null }) {
@@ -147,6 +147,7 @@ export default function FootballArena({ playerId }: { playerId: string | null })
         y: input.y,
         shot: input.shot,
         heel: input.heel,
+        charge: input.charge,
       });
     }, 100);
     return () => {
@@ -171,6 +172,7 @@ export default function FootballArena({ playerId }: { playerId: string | null })
         y: touchRef.current.y || keyboardY,
         shot: touchRef.current.shot || keys.has(" "),
         heel: touchRef.current.heel || keys.has("f"),
+        charge: touchRef.current.charge || keys.has("shift"),
       };
     };
     const down = (event: KeyboardEvent) => {
@@ -178,7 +180,7 @@ export default function FootballArena({ playerId }: { playerId: string | null })
       const target = event.target;
       if (target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
       const key = event.key.toLowerCase();
-      if (["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright", " ", "f"].includes(key)) {
+      if (["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright", " ", "f", "shift"].includes(key)) {
         event.preventDefault();
         keySetRef.current.add(key);
         update();
@@ -252,6 +254,11 @@ export default function FootballArena({ playerId }: { playerId: string | null })
           context.lineWidth = player.id === playerId ? 4 : 2;
           context.beginPath(); context.arc(point.x, point.y, 19, 0, Math.PI * 2);
           context.strokeStyle = player.connected ? "#fff" : "#bbb"; context.stroke();
+          if (player.knocked) {
+            context.beginPath(); context.arc(point.x, point.y, 25, 0, Math.PI * 2);
+            context.lineWidth = 3; context.strokeStyle = "#ffe08a"; context.stroke();
+            context.fillStyle = "#ffe08a"; context.font = "700 18px Arial"; context.fillText("✦", point.x + 22, point.y - 13);
+          }
           context.fillStyle = "#fff"; context.font = "600 12px Arial"; context.textAlign = "center"; context.textBaseline = "alphabetic";
           context.fillStyle = "#fff"; context.font = "600 12px Arial"; context.textAlign = "center";
           context.fillText(player.name.slice(0, 15), point.x, point.y - 28);
@@ -317,6 +324,7 @@ export default function FootballArena({ playerId }: { playerId: string | null })
       y: touchRef.current.y || keyboardY,
       shot: touchRef.current.shot || keys.has(" "),
       heel: touchRef.current.heel || keys.has("f"),
+      charge: touchRef.current.charge || keys.has("shift"),
     };
   };
   const sendStart = () => send({ type: "start" });
@@ -364,8 +372,8 @@ export default function FootballArena({ playerId }: { playerId: string | null })
             {game?.phase === "playing" ? (
               <>
                 <div className="arena-score"><span>RÖDA {game.score[0]}</span><strong>{Math.ceil(game.remainingMs / 60000)}:{String(Math.floor(game.remainingMs / 1000) % 60).padStart(2, "0")}</strong><span>{game.score[1]} BLÅA</span></div>
-                <canvas id="arena-canvas" className="arena-canvas" aria-label="Fotbollsplan. Styr med WASD eller piltangenter och skjut med mellanslag." />
-                <div className="arena-controls"><span className="arena-keyboard-hint"><b>WASD / pilar</b> rör dig · <b>mellanslag</b> skjut · <b>F</b> klack</span><MobileControls press={press} /></div>
+                <canvas id="arena-canvas" className="arena-canvas" aria-label="Fotbollsplan. Styr med joysticken eller WASD. Skjut med knappen eller mellanslag, klacka med knappen eller F och håll CHARGA eller Shift för att tackla." />
+                <div className="arena-controls"><span className="arena-keyboard-hint"><b>WASD / pilar</b> rör dig · <b>mellanslag</b> skjut · <b>F</b> klack · håll <b>Shift</b> för att tackla</span><MobileControls press={press} /></div>
               </>
             ) : (
               <div className="arena-lobby">
@@ -389,7 +397,7 @@ export default function FootballArena({ playerId }: { playerId: string | null })
         )}
         {!roomId && error && <div className="arena-error" role="status">{error}</div>}
       </section>
-      <section className="panel arena-help"><div className="panel-heading"><h2>Så spelar ni</h2><Gamepad2 size={21} /></div><ul><li>På mobil: styr med joysticken längst ner till vänster.</li><li><b>Skjut</b> skickar bollen i den riktning du rör dig.</li><li><b>Klack</b> skickar bollen åt motsatt håll.</li><li>På dator: WASD eller pilar, mellanslag för skott och F för klack.</li><li>Lagbalansen sköts automatiskt när spelare går med.</li><li>Öppna rum syns direkt i listan här och kan anslutas med ett tryck.</li></ul></section>
+      <section className="panel arena-help"><div className="panel-heading"><h2>Så spelar ni</h2><Gamepad2 size={21} /></div><ul><li>På mobil: styr med joysticken längst ner till vänster.</li><li><b>Skjut</b> skickar bollen i den riktning du rör dig.</li><li><b>Klack</b> skickar bollen åt motsatt håll.</li><li>Håll <b>CHARGA</b> eller <b>Shift</b> och styr in i en motspelare för en tackling.</li><li>Vid tackling knuffas båda bakåt en kort stund; riktning och återhämtning varierar.</li><li>På dator: WASD eller pilar, mellanslag för skott och F för klack.</li><li>Lagbalansen sköts automatiskt när spelare går med.</li><li>Öppna rum syns direkt i listan här och kan anslutas med ett tryck.</li></ul></section>
     </div>
   );
 }
@@ -410,7 +418,7 @@ function MobileControls({ press }: { press: (patch: Partial<InputState>) => void
     press({ x, y });
   };
   const releaseStick = () => { setStick({ x: 0, y: 0 }); press({ x: 0, y: 0 }); };
-  const action = (key: "shot" | "heel") => ({
+  const action = (key: "shot" | "heel" | "charge") => ({
     onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); press({ [key]: true }); },
     onPointerUp: () => press({ [key]: false }),
     onPointerCancel: () => press({ [key]: false }),
@@ -426,6 +434,7 @@ function MobileControls({ press }: { press: (patch: Partial<InputState>) => void
     <div className="arena-action-buttons">
       <button className="arena-heel" {...action("heel")}>KLACK</button>
       <button className="arena-kick" {...action("shot")}>SKJUT</button>
+      <button className="arena-charge" {...action("charge")}>HÅLL · CHARGA</button>
     </div>
   </div>;
 }
