@@ -18,8 +18,8 @@ export async function POST(request: Request) {
   if (!secret || secret.length < 32) return Response.json({ error: "Spelet är inte konfigurerat ännu." }, { status: 503 });
 
   const result = await db.query(
-    `SELECT r.id,COALESCE(r.display_name,u.name) AS name
-     FROM roster r JOIN "user" u ON u.id=r.user_id WHERE r.user_id=$1`,
+    `SELECT r.id,COALESCE(r.display_name,u.name) AS name,(rp.photo IS NOT NULL) AS "hasPhoto"
+     FROM roster r JOIN "user" u ON u.id=r.user_id LEFT JOIN roster_profile rp ON rp.player_id=r.id WHERE r.user_id=$1`,
     [session.user.id],
   );
   if (!result.rowCount) return Response.json({ error: "Koppla ditt konto till en spelarprofil för att spela." }, { status: 403 });
@@ -28,6 +28,7 @@ export async function POST(request: Request) {
     roomId: body.roomId,
     playerId: result.rows[0].id,
     name: result.rows[0].name,
+    avatarUrl: result.rows[0].hasPhoto ? `/api/player-photo?id=${encodeURIComponent(result.rows[0].id)}` : null,
     team: "inkastarna",
     exp: Math.floor(Date.now() / 1000) + 45,
   })).toString("base64url");

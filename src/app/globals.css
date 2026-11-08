@@ -1527,6 +1527,25 @@ tr.highlight td {
   font: inherit;
   letter-spacing: 2px;
 }
+.arena-open-rooms {
+  margin-top: 18px;
+  border-top: 1px solid var(--line);
+  padding-top: 13px;
+}
+.arena-open-rooms-heading,
+.arena-open-room {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.arena-open-rooms-heading { margin-bottom: 7px; font-size: 11px; }
+.arena-open-rooms-heading > span { min-width: 22px; padding: 3px 6px; border-radius: 99px; background: var(--accent-wash); color: var(--accent-ink); text-align: center; font-size: 9px; }
+.arena-open-room { padding: 10px 0; border-top: 1px solid var(--line); }
+.arena-open-room > div { min-width: 0; display: grid; gap: 3px; }
+.arena-open-room > div > strong { font: 750 14px var(--heading); letter-spacing: 1px; }
+.arena-open-room > div > span { color: var(--muted); font-size: 9px; }
+.arena-open-room .button { flex: 0 0 auto; min-height: 34px; padding: 7px 9px; font-size: 9px; }
 .arena-toolbar {
   min-height: 56px;
   display: flex;
@@ -1544,6 +1563,22 @@ tr.highlight td {
   padding: 7px 10px;
   font-size: 10px;
 }
+.arena-room-banner {
+  margin: 14px 18px 0;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid #27734335;
+  border-radius: 8px;
+  background: linear-gradient(110deg, #27734312, #27734305);
+}
+.arena-room-banner > div { display: grid; gap: 3px; }
+.arena-room-banner small { color: var(--muted); font-size: 8px; font-weight: 750; letter-spacing: 1.1px; }
+.arena-room-banner strong { font: 800 25px var(--heading); letter-spacing: 2px; }
+.arena-room-banner span { color: var(--muted); font-size: 10px; }
+.arena-room-banner .button { flex: 0 0 auto; }
 .arena-connection {
   display: inline-flex;
   align-items: center;
@@ -1646,6 +1681,45 @@ tr.highlight td {
 }
 .arena-controls b { color: var(--ink); }
 .arena-touch { display: none; }
+.arena-touch button { font: 800 11px var(--heading); }
+.arena-joystick {
+  width: 126px;
+  height: 126px;
+  position: relative;
+  display: grid;
+  place-items: center;
+  border: 1px solid #ffffff3b;
+  border-radius: 50%;
+  background: radial-gradient(circle, #ffffff14 0 46%, #101c1740 47% 100%);
+  box-shadow: inset 0 0 0 8px #ffffff0b, 0 5px 16px #0002;
+  touch-action: none;
+  user-select: none;
+}
+.arena-joystick-knob {
+  width: 52px;
+  height: 52px;
+  border: 2px solid #ffffffb0;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #ffffff, #dbe7de);
+  box-shadow: 0 3px 10px #0005;
+  pointer-events: none;
+}
+.arena-action-buttons { display: grid; gap: 10px; justify-items: end; }
+.arena-action-buttons button {
+  min-width: 92px;
+  min-height: 54px;
+  padding: 0 12px;
+  border: 1px solid #ffffff4d;
+  border-radius: 18px;
+  color: white;
+  box-shadow: 0 4px 10px #0003;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.arena-action-buttons .arena-kick { background: linear-gradient(145deg,#202522,#111); }
+.arena-action-buttons .arena-heel { background: linear-gradient(145deg,#d88431,#a85320); }
+.arena-action-buttons button:active { transform: scale(.96); }
 .arena-help ul {
   margin: 0;
   padding: 2px 24px 20px 40px;
@@ -2486,42 +2560,29 @@ tr.highlight td {
   .arena-toolbar { gap: 7px; padding-inline: 10px; }
   .arena-toolbar .arena-connection { display: none; }
   .arena-toolbar > strong { font-size: 10px; }
-  .arena-toolbar .button { padding-inline: 8px; }
+  .arena-room-banner { margin: 10px 10px 0; padding: 11px 12px; }
+  .arena-room-banner small { font-size: 7px; }
+  .arena-room-banner strong { font-size: 22px; }
+  .arena-room-banner span { font-size: 9px; }
+  .arena-room-banner .button { min-height: 42px; padding-inline: 10px; font-size: 9px; }
   .arena-teams { gap: 8px; }
-  .arena-controls { flex-wrap: wrap; justify-content: center; }
+  .arena-controls { min-height: 0; padding: 8px 12px 14px; display: block; }
+  .arena-keyboard-hint { display: none; }
   .arena-touch {
     width: 100%;
     display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 4px 18px;
-    justify-items: center;
-    padding-top: 8px;
+    grid-template-columns: 1fr 1fr;
+    align-items: center;
+    justify-items: stretch;
+    gap: 14px;
+    padding: 10px 8px 4px;
     touch-action: none;
   }
-  .arena-touch > div { display: flex; gap: 4px; }
-  .arena-touch button {
-    width: 42px;
-    height: 38px;
-    border: 1px solid var(--line);
-    border-radius: 5px;
-    background: var(--surface-raised);
-    color: var(--ink);
-    font-size: 18px;
-    touch-action: none;
-    user-select: none;
-  }
-  .arena-touch .arena-kick {
-    grid-column: 2;
-    grid-row: 1 / span 2;
-    width: 72px;
-    height: 72px;
-    border-radius: 50%;
-    background: #191919;
-    color: #fff;
-    font-size: 10px;
-    font-weight: 800;
-    letter-spacing: .5px;
-  }
+  .arena-joystick { width: min(126px, 34vw); height: min(126px, 34vw); justify-self: start; }
+  .arena-joystick-knob { width: 43%; height: 43%; }
+  .arena-action-buttons { justify-self: end; }
+  .arena-action-buttons button { min-width: min(100px, 28vw); min-height: 52px; }
+  .arena-canvas { max-height: min(48vh, 330px); }
   .sidebar {
     transform: translateX(-100%);
     width: 250px;
@@ -2899,6 +2960,11 @@ tr.highlight td {
     font-size: 9px;
     padding-inline: 10px;
   }
+}
+@media (pointer: coarse) and (min-width: 701px) {
+  .arena-keyboard-hint { display: none; }
+  .arena-controls { min-height: 0; padding: 10px 18px 16px; }
+  .arena-touch { margin-left: auto; width: min(430px, 56%); display: grid; grid-template-columns: 1fr 1fr; align-items: center; }
 }
 @media (prefers-reduced-motion: reduce) {
   *,

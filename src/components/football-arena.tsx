@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Copy, Gamepad2, LogOut, Play, RefreshCw, Users } from "lucide-react";
 
-type GamePlayer = { id: string; name: string; team: number; x: number; y: number; connected: boolean };
+type GamePlayer = { id: string; name: string; avatarUrl?: string | null; team: number; x: number; y: number; connected: boolean };
 type GameState = {
   type: "state";
   phase: "lobby" | "playing" | "finished";
@@ -14,15 +14,17 @@ type GameState = {
   ball: { x: number; y: number; vx: number; vy: number };
   players: GamePlayer[];
 };
-type InputState = { up: boolean; down: boolean; left: boolean; right: boolean; kick: boolean };
+type OpenRoom = { roomId: string; phase: "lobby" | "playing"; players: number; connected: number };
+type InputState = { x: number; y: number; shot: boolean; heel: boolean };
 
-const blankInput = (): InputState => ({ up: false, down: false, left: false, right: false, kick: false });
+const blankInput = (): InputState => ({ x: 0, y: 0, shot: false, heel: false });
 const roomPattern = /^[A-HJ-NP-Z2-9]{6}$/;
 
 export default function FootballArena({ playerId }: { playerId: string | null }) {
   const [roomId, setRoomId] = useState("");
   const [roomDraft, setRoomDraft] = useState("");
   const [game, setGame] = useState<GameState | null>(null);
+  const [openRooms, setOpenRooms] = useState<OpenRoom[]>([]);
   const [connection, setConnection] = useState<"idle" | "connecting" | "connected" | "reconnecting">("idle");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
@@ -36,6 +38,25 @@ export default function FootballArena({ playerId }: { playerId: string | null })
     const queryRoom = new URLSearchParams(window.location.search).get("room")?.toUpperCase() ?? "";
     if (roomPattern.test(queryRoom)) setRoomId(queryRoom);
   }, []);
+
+  useEffect(() => {
+    if (!playerId || roomId) { setOpenRooms([]); return; }
+    const workerUrl = process.env.NEXT_PUBLIC_GAME_WS_URL;
+    if (!workerUrl) return;
+    const roomsUrl = workerUrl.replace(/^wss:/, "https:").replace(/^ws:/, "http:").replace(/\/$/, "") + "/rooms";
+    let stopped = false;
+    const loadRooms = async () => {
+      try {
+        const response = await fetch(roomsUrl, { cache: "no-store" });
+        if (!response.ok) return;
+        const data = await response.json() as { rooms?: OpenRoom[] };
+        if (!stopped) setOpenRooms(Array.isArray(data.rooms) ? data.rooms : []);
+      } catch { /* Room discovery is optional while the game server reconnects. */ }
+    };
+    void loadRooms();
+    const timer = setInterval(loadRooms, 8_000);
+    return () => { stopped = true; clearInterval(timer); };
+  }, [playerId, roomId]);
 
   const send = useCallback((event: Record<string, unknown>) => {
     const socket = socketRef.current;
@@ -122,9 +143,10 @@ export default function FootballArena({ playerId }: { playerId: string | null })
       const input = inputRef.current;
       send({
         type: "input",
-        x: Number(input.right) - Number(input.left),
-        y: Number(input.down) - Number(input.up),
-        kick: input.kick,
+        x: input.x,
+        y: input.y,
+        shot: input.shot,
+        heel: input.heel,
       });
     }, 100);
     return () => {
@@ -142,12 +164,13 @@ export default function FootballArena({ playerId }: { playerId: string | null })
   useEffect(() => {
     const update = () => {
       const keys = keySetRef.current;
+      const keyboardX = Number(keys.has("d") || keys.has("arrowright")) - Number(keys.has("a") || keys.has("arrowleft"));
+      const keyboardY = Number(keys.has("s") || keys.has("arrowdown")) - Number(keys.has("w") || keys.has("arrowup"));
       inputRef.current = {
-        up: touchRef.current.up || keys.has("w") || keys.has("arrowup"),
-        down: touchRef.current.down || keys.has("s") || keys.has("arrowdown"),
-        left: touchRef.current.left || keys.has("a") || keys.has("arrowleft"),
-        right: touchRef.current.right || keys.has("d") || keys.has("arrowright"),
-        kick: touchRef.current.kick || keys.has(" "),
+        x: touchRef.current.x || keyboardX,
+        y: touchRef.current.y || keyboardY,
+        shot: touchRef.current.shot || keys.has(" "),
+        heel: touchRef.current.heel || keys.has("f"),
       };
     };
     const down = (event: KeyboardEvent) => {
@@ -155,7 +178,7 @@ export default function FootballArena({ playerId }: { playerId: string | null })
       const target = event.target;
       if (target instanceof HTMLElement && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
       const key = event.key.toLowerCase();
-      if (["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(key)) {
+      if (["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright", " ", "f"].includes(key)) {
         event.preventDefault();
         keySetRef.current.add(key);
         update();
@@ -182,6 +205,7 @@ export default function FootballArena({ playerId }: { playerId: string | null })
     if (!canvas || !context) return;
     let frame = 0;
     const displayed = new Map<string, { x: number; y: number }>();
+    const avatars = new Map<string, HTMLImageElement>();
     const resize = () => {
       const ratio = Math.min(window.devicePixelRatio || 1, 1.5);
       canvas.width = Math.round(1000 * ratio);
@@ -212,10 +236,23 @@ export default function FootballArena({ playerId }: { playerId: string | null })
           point.x += (player.x - point.x) * 0.28;
           point.y += (player.y - point.y) * 0.28;
           displayed.set(player.id, point);
-          context.beginPath(); context.arc(point.x, point.y, 20, 0, Math.PI * 2);
-          context.fillStyle = player.team === 0 ? "#f25a57" : "#4ba8ff"; context.fill();
+          let avatar = player.avatarUrl ? avatars.get(player.id) : undefined;
+          if (player.avatarUrl && !avatar) {
+            avatar = new Image(); avatar.src = player.avatarUrl; avatars.set(player.id, avatar);
+          }
+          context.save(); context.beginPath(); context.arc(point.x, point.y, 18, 0, Math.PI * 2); context.clip();
+          context.fillStyle = player.team === 0 ? "#f25a57" : "#4ba8ff"; context.fillRect(point.x - 18, point.y - 18, 36, 36);
+          if (avatar?.complete && avatar.naturalWidth > 0) context.drawImage(avatar, point.x - 18, point.y - 18, 36, 36);
+          else {
+            const initials = player.name.trim().split(/\s+/).map((part) => part[0] ?? "").join("").slice(0, 2).toUpperCase();
+            context.fillStyle = "#fff"; context.font = "700 13px Arial"; context.textAlign = "center"; context.textBaseline = "middle";
+            context.fillText(initials, point.x, point.y + 1);
+          }
+          context.restore();
           context.lineWidth = player.id === playerId ? 4 : 2;
+          context.beginPath(); context.arc(point.x, point.y, 19, 0, Math.PI * 2);
           context.strokeStyle = player.connected ? "#fff" : "#bbb"; context.stroke();
+          context.fillStyle = "#fff"; context.font = "600 12px Arial"; context.textAlign = "center"; context.textBaseline = "alphabetic";
           context.fillStyle = "#fff"; context.font = "600 12px Arial"; context.textAlign = "center";
           context.fillText(player.name.slice(0, 15), point.x, point.y - 28);
         }
@@ -270,15 +307,16 @@ export default function FootballArena({ playerId }: { playerId: string | null })
     } catch { setError("Kunde inte kopiera länken. Dela rumskoden " + roomId + " manuellt."); }
   };
 
-  const press = (key: keyof InputState, down: boolean) => {
-    touchRef.current = { ...touchRef.current, [key]: down };
+  const press = (patch: Partial<InputState>) => {
+    touchRef.current = { ...touchRef.current, ...patch };
     const keys = keySetRef.current;
+    const keyboardX = Number(keys.has("d") || keys.has("arrowright")) - Number(keys.has("a") || keys.has("arrowleft"));
+    const keyboardY = Number(keys.has("s") || keys.has("arrowdown")) - Number(keys.has("w") || keys.has("arrowup"));
     inputRef.current = {
-      up: touchRef.current.up || keys.has("w") || keys.has("arrowup"),
-      down: touchRef.current.down || keys.has("s") || keys.has("arrowdown"),
-      left: touchRef.current.left || keys.has("a") || keys.has("arrowleft"),
-      right: touchRef.current.right || keys.has("d") || keys.has("arrowright"),
-      kick: touchRef.current.kick || keys.has(" "),
+      x: touchRef.current.x || keyboardX,
+      y: touchRef.current.y || keyboardY,
+      shot: touchRef.current.shot || keys.has(" "),
+      heel: touchRef.current.heel || keys.has("f"),
     };
   };
   const sendStart = () => send({ type: "start" });
@@ -303,21 +341,31 @@ export default function FootballArena({ playerId }: { playerId: string | null })
               <label htmlFor="arena-room-code">Gå med med rumskod</label>
               <div><input id="arena-room-code" value={roomDraft} maxLength={6} onChange={(event) => setRoomDraft(event.target.value.toUpperCase())} placeholder="ABC123" /><button className="button subtle">Gå med</button></div>
             </form>
+            {openRooms.length > 0 && <div className="arena-open-rooms">
+              <div className="arena-open-rooms-heading"><strong>Spelrum öppna nu</strong><span>{openRooms.length}</span></div>
+              {openRooms.map((room) => <div className="arena-open-room" key={room.roomId}>
+                <div><strong>{room.roomId}</strong><span>{room.phase === "playing" ? "Match pågår" : "Väntar på spelare"} · {room.connected}/10 anslutna</span></div>
+                <button className="button subtle" onClick={() => enterRoom(room.roomId)}><Play size={13} /> Gå med</button>
+              </div>)}
+            </div>}
           </div>
         ) : (
           <>
             <div className="arena-toolbar">
               <span className={`arena-connection ${connection}`}><i />{connection === "connected" ? "Ansluten" : connection === "reconnecting" ? "Återansluter" : "Ansluter"}</span>
               <strong>Rum {roomId}</strong>
-              <button className="button subtle" onClick={() => void shareRoom()}><Copy size={14} /> {copied ? "Kopierad" : "Dela rum"}</button>
               <button className="icon-button" onClick={leaveRoom} aria-label="Lämna spelrummet"><LogOut size={17} /></button>
+            </div>
+            <div className="arena-room-banner">
+              <div><small>SKICKA INBJUDAN TILL LAGET</small><strong>{roomId}</strong><span>{game?.players.filter((player) => player.connected).length ?? 0} anslutna · upp till 10 spelare</span></div>
+              <button className="button dark" onClick={() => void shareRoom()}><Copy size={15} /> {copied ? "Länk kopierad" : "Kopiera inbjudan"}</button>
             </div>
             {error && <div className="arena-error" role="status">{error}</div>}
             {game?.phase === "playing" ? (
               <>
                 <div className="arena-score"><span>RÖDA {game.score[0]}</span><strong>{Math.ceil(game.remainingMs / 60000)}:{String(Math.floor(game.remainingMs / 1000) % 60).padStart(2, "0")}</strong><span>{game.score[1]} BLÅA</span></div>
                 <canvas id="arena-canvas" className="arena-canvas" aria-label="Fotbollsplan. Styr med WASD eller piltangenter och skjut med mellanslag." />
-                <div className="arena-controls"><span><b>WASD / pilar</b> rör dig</span><span><b>Mellanslag</b> skjut</span><MobileControls press={press} /></div>
+                <div className="arena-controls"><span className="arena-keyboard-hint"><b>WASD / pilar</b> rör dig · <b>mellanslag</b> skjut · <b>F</b> klack</span><MobileControls press={press} /></div>
               </>
             ) : (
               <div className="arena-lobby">
@@ -341,17 +389,43 @@ export default function FootballArena({ playerId }: { playerId: string | null })
         )}
         {!roomId && error && <div className="arena-error" role="status">{error}</div>}
       </section>
-      <section className="panel arena-help"><div className="panel-heading"><h2>Så spelar ni</h2><Gamepad2 size={21} /></div><ul><li>Rör dig med <b>WASD</b> eller piltangenterna.</li><li>Tryck <b>mellanslag</b> nära bollen för att skjuta.</li><li>På mobil använder du riktningsknapparna och skjutknappen.</li><li>Lagbalansen sköts automatiskt när spelare går med.</li></ul></section>
+      <section className="panel arena-help"><div className="panel-heading"><h2>Så spelar ni</h2><Gamepad2 size={21} /></div><ul><li>På mobil: styr med joysticken längst ner till vänster.</li><li><b>Skjut</b> skickar bollen i den riktning du rör dig.</li><li><b>Klack</b> skickar bollen åt motsatt håll.</li><li>På dator: WASD eller pilar, mellanslag för skott och F för klack.</li><li>Lagbalansen sköts automatiskt när spelare går med.</li><li>Öppna rum syns direkt i listan här och kan anslutas med ett tryck.</li></ul></section>
     </div>
   );
 }
 
-function MobileControls({ press }: { press: (key: keyof InputState, down: boolean) => void }) {
-  const bind = (key: keyof InputState) => ({
-    onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); press(key, true); },
-    onPointerUp: () => press(key, false),
-    onPointerCancel: () => press(key, false),
-    onLostPointerCapture: () => press(key, false),
+function MobileControls({ press }: { press: (patch: Partial<InputState>) => void }) {
+  const [stick, setStick] = useState({ x: 0, y: 0 });
+  const joystick = useRef<HTMLDivElement>(null);
+  const updateStick = (event: React.PointerEvent<HTMLDivElement>) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const radius = Math.min(bounds.width, bounds.height) * 0.36;
+    const dx = event.clientX - (bounds.left + bounds.width / 2);
+    const dy = event.clientY - (bounds.top + bounds.height / 2);
+    const length = Math.hypot(dx, dy);
+    const scale = length > radius ? radius / length : 1;
+    const x = dx * scale / radius;
+    const y = dy * scale / radius;
+    setStick({ x: dx * scale, y: dy * scale });
+    press({ x, y });
+  };
+  const releaseStick = () => { setStick({ x: 0, y: 0 }); press({ x: 0, y: 0 }); };
+  const action = (key: "shot" | "heel") => ({
+    onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); press({ [key]: true }); },
+    onPointerUp: () => press({ [key]: false }),
+    onPointerCancel: () => press({ [key]: false }),
+    onLostPointerCapture: () => press({ [key]: false }),
   });
-  return <div className="arena-touch" aria-label="Pekskärmskontroller"><div><button {...bind("up")} aria-label="Framåt">↑</button></div><div><button {...bind("left")} aria-label="Vänster">←</button><button {...bind("down")} aria-label="Bakåt">↓</button><button {...bind("right")} aria-label="Höger">→</button></div><button className="arena-kick" {...bind("kick")}>SKJUT</button></div>;
+  return <div className="arena-touch" aria-label="Touchkontroller">
+    <div ref={joystick} className="arena-joystick" role="application" aria-label="Rörelsejoystick"
+      onPointerDown={(event) => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); updateStick(event); }}
+      onPointerMove={(event) => { if (event.currentTarget.hasPointerCapture(event.pointerId)) updateStick(event); }}
+      onPointerUp={releaseStick} onPointerCancel={releaseStick} onLostPointerCapture={releaseStick}>
+      <span className="arena-joystick-knob" style={{ transform: `translate(${stick.x}px, ${stick.y}px)` }} />
+    </div>
+    <div className="arena-action-buttons">
+      <button className="arena-heel" {...action("heel")}>KLACK</button>
+      <button className="arena-kick" {...action("shot")}>SKJUT</button>
+    </div>
+  </div>;
 }
